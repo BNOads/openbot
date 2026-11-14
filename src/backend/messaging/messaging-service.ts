@@ -564,6 +564,7 @@ export class MessagingService {
     // Signal sends a workspace or chat that is linked to another host there: only a new link brings it here.
     if (this.#live.get(record.connectionId)?.state === "not_linked") {
       if (platform === "slack") return yield* this.connectSlackWorkspace(opensPage);
+      if (platform === "discord") return yield* this.connectDiscordGuild(opensPage);
       if (platform === "telegram")
         return yield* this.connectTelegramChat(workspaceId.startsWith("-") ? "group" : "direct", opensPage);
     }
@@ -1542,20 +1543,25 @@ export class MessagingService {
       Effect.succeed(staging),
       () =>
         Effect.gen({ self: this }, function* () {
-          // The message's own files first, then the newest earlier ones, within the attachment limits.
-          // An earlier message of this conversation that reached OpenBot gave its files with itself.
-          const earlierFiles = earlier
-            .filter(
-              (entry) =>
-                !existing ||
-                !this.#threads.received(
-                  `messaging:${live.record.connectionId}:${message.platformChannelId}:${entry.id}`,
-                ),
-            )
-            .toReversed()
-            .flatMap((entry) =>
-              (entry.files ?? []).map((file) => ({ file, label: `${entry.authorName}: ${file.name}` })),
-            );
+          // The message's own files first, then those of the message it replies to, then the newest
+          // earlier ones, within the attachment limits. An earlier message of this conversation that
+          // reached OpenBot gave its files with itself.
+          const gave = (messageId: string) =>
+            Boolean(existing) &&
+            this.#threads.received(`messaging:${live.record.connectionId}:${message.platformChannelId}:${messageId}`);
+          const quoted =
+            quote?.messageId && !gave(quote.messageId)
+              ? (quote.files ?? []).map((file) => ({ file, label: `${quote.authorName}: ${file.name}` }))
+              : [];
+          const earlierFiles = [
+            ...quoted,
+            ...earlier
+              .filter((entry) => !gave(entry.id))
+              .toReversed()
+              .flatMap((entry) =>
+                (entry.files ?? []).map((file) => ({ file, label: `${entry.authorName}: ${file.name}` })),
+              ),
+          ];
           const { paths, skipped } = yield* this.#download(
             adapter,
             [...message.files, ...earlierFiles.map((item) => item.file)],
@@ -1716,10 +1722,10 @@ export class MessagingService {
     const place = link.isDirect
       ? "direct message"
       : yield* live.adapter.placeName(link.platformChannelId).pipe(toMessagingOperationFailed);
-    const messages = yield* live.adapter
+    const recent = yield* live.adapter
       .recent(link.platformChannelId, scope === "conversation" ? link.threadKey : null, limit)
       .pipe(toMessagingOperationFailed);
-    return { platform: live.record.platform, place, messages };
+    return { platform: live.record.platform, place, ...recent };
   });
 
   /** The places of a connection, for the agent's `messaging_list_places` tool. */
@@ -1756,8 +1762,8 @@ export class MessagingService {
           error:
             "This connection has no place with that id. Call openbot.messaging_list_places with the connection for the ids.",
         };
-      const messages = yield* live.adapter.recent(placeId, null, limit);
-      return { history: { platform, place: place.name, messages } };
+      const recent = yield* live.adapter.recent(placeId, null, limit);
+      return { history: { platform, place: place.name, ...recent } };
     }).pipe(
       Effect.catch((failure) =>
         Effect.succeed({ error: `${refusal(failure)} When the platform limits reads, try again in a minute.` }),
@@ -2511,6 +2517,9 @@ const WHATSAPP_LOCAL_REFUSALS = new Map([
   ["not_linked", WHATSAPP_NOT_CONNECTED],
 ]);
 
+const DISCORD_NOT_LINKED =
+  "This Discord server is not linked to this OpenBot server now. Another OpenBot server of the user may answer there. Tell the user to open Marketplace, then Apps, then Discord, and to select Reconnect for this Discord server if this server must answer there.";
+
 /** The platform's error code, such as Slack's `not_in_channel`, and never its text or a token. */
 function refusal(failure: MessagingAdapterError): string {
   const cause = failure.cause;
@@ -2519,6 +2528,8 @@ function refusal(failure: MessagingAdapterError): string {
     return `WhatsApp refused the message: ${cause.code}. It was not delivered. Do not post it again: tell the user that WhatsApp did not deliver it.`;
   const local = cause instanceof Error ? WHATSAPP_LOCAL_REFUSALS.get(cause.message) : undefined;
   if (local) return local;
+  // Signal routes the guild to another host of the account, or to none. Only a new link brings it back.
+  if (cause instanceof DiscordApiError && cause.code === "unknown_guild") return DISCORD_NOT_LINKED;
   const code =
     cause instanceof SlackApiError || cause instanceof DiscordApiError || cause instanceof TelegramCallError
       ? cause.code

@@ -74,6 +74,9 @@ interface InboundQuote {
   mentionedUserIds: string[];
   /** ISO time. */
   sentAt: string;
+  /** The replied-to message's id and files, for a platform that keeps them apart from the message's own files. */
+  messageId?: string;
+  files?: InboundFile[];
 }
 
 interface InboundActionBase {
@@ -122,6 +125,12 @@ export interface ContextEntry {
   sentAt: string;
   /** The message's files, which the agent gets with the message that it answers. */
   files?: InboundFile[];
+}
+
+/** What the history tool reads of a place. `note` says why the platform gave fewer messages, when it knows. */
+export interface RecentMessages {
+  messages: ContextEntry[];
+  note?: string;
 }
 
 /** A failure the connection cannot recover from alone. The user must act. */
@@ -201,7 +210,7 @@ export interface MessagingAdapter {
     platformChannelId: string,
     threadKey: string | null,
     limit: number,
-  ): Effect.Effect<ContextEntry[], MessagingAdapterError>;
+  ): Effect.Effect<RecentMessages, MessagingAdapterError>;
   /** Downloads one file to `destination`. Refuses a file larger than `maxBytes`. */
   download(file: InboundFile, destination: string, maxBytes: number): Effect.Effect<void, MessagingAdapterError>;
   authorName(userId: string): Effect.Effect<string, MessagingAdapterError>;
@@ -359,7 +368,8 @@ export interface MessagingIngress {
   ): Effect.Effect<A, MessagingAdapterError>;
   /**
    * Calls `listener` with the Discord guilds that Signal routes to the socket, each time Signal
-   * sends a session. A guild of this host that is not in it was unlinked, or the bot left it.
+   * sends a session, and when Signal refuses a call because it no longer routes a guild here. A guild
+   * of this host that is not in it was linked to another host, unlinked, or the bot left it.
    */
   onDiscordRoutes(listener: (guildIds: ReadonlySet<string>) => void): () => void;
   /**
