@@ -62,6 +62,10 @@ export interface BrowserFullViewProps {
   canEnterPip?: boolean;
   onBack: () => void;
   onEnterPip: () => void;
+  /** Toggles manual user control ("Assumir Navegador" / "Devolver ao Bot") on the active tab. */
+  onToggleUserControl?: ((tab: BrowserTab) => void) | undefined;
+  /** Sends a quick natural-language command to the active tab's agent (releasing user control if held). */
+  onQuickCommand?: ((prompt: string, tab: BrowserTab | undefined) => void) | undefined;
   /**
    * Opens a sign-in for the tab on this computer, for a server whose address a site refuses. Absent where
    * the host cannot take one, or where this app cannot open a window.

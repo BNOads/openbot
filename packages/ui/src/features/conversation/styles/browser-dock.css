@@ -269,6 +269,13 @@
   border-radius: var(--openbot-radius-pill);
 }
 
+.browser-dock-quick-handoff.ui-button {
+  flex: none;
+  border-radius: var(--openbot-radius-pill);
+  font-size: var(--openbot-text-xs);
+  white-space: nowrap;
+}
+
 .browser-dock .browser-dock-tab {
   position: absolute;
   bottom: 0;

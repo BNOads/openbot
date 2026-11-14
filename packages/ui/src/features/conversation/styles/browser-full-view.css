@@ -565,3 +565,28 @@ body[data-browser-full-view] .app-frame {
     padding-top: var(--openbot-space-3);
   }
 }
+
+.browser-handoff-pill.ui-button {
+  flex: none;
+  border-radius: var(--openbot-radius-pill);
+  font-weight: var(--openbot-weight-medium);
+  white-space: nowrap;
+}
+
+.browser-handoff-pill[data-user-control] {
+  box-shadow: 0 0 0 1.5px var(--openbot-accent);
+}
+
+.browser-quick-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--openbot-space-1);
+  flex: none;
+}
+
+.browser-quick-chip.ui-button {
+  border: 1px solid var(--openbot-border);
+  border-radius: var(--openbot-radius-pill);
+  font-size: var(--openbot-text-xs);
+  white-space: nowrap;
+}

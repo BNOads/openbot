@@ -56,6 +56,11 @@ export default function BrowserFullViewAdapter() {
     stopBrowserTeach,
     sendCardFile,
     addPageText,
+    takeBrowserControl,
+    releaseBrowserControl,
+    respondToBrowserTakeover,
+    updateCurrentDraft,
+    submitComposer,
   } = useConversationViewScope();
   const { t } = useText();
   const serverId = () => props.server?.id ?? "";
@@ -200,6 +205,28 @@ export default function BrowserFullViewAdapter() {
       liveViewClipboard={serverSupportsCapability(props.server, "browser-view-clipboard")}
       onBack={() => setActiveRightPanel("browser")}
       onEnterPip={props.runtime ? () => undefined : showBrowserPip}
+      onToggleUserControl={(tab) => {
+        if (props.browserTakeover?.tabId === tab.id) {
+          void respondToBrowserTakeover("complete");
+        } else if (tab.userControl) {
+          void releaseBrowserControl(tab.id);
+        } else {
+          void takeBrowserControl(tab.id);
+        }
+      }}
+      onQuickCommand={(prompt, tab) => {
+        void (async () => {
+          if (tab) {
+            if (props.browserTakeover?.tabId === tab.id) {
+              await respondToBrowserTakeover("complete");
+            } else if (tab.userControl) {
+              await releaseBrowserControl(tab.id);
+            }
+          }
+          updateCurrentDraft({ text: prompt });
+          submitComposer();
+        })();
+      }}
       onSignInLocally={localSignIn.canStart(activeBrowserTab()) ? localSignIn.start : undefined}
       teach={teach()}
       // A local tab is a native view above this window, so its dock goes in the overlay above the page.

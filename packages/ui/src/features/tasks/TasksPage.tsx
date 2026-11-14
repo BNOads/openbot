@@ -1,9 +1,10 @@
-import type { AgentTask, DraftAttachment } from "@openbot/contracts/ipc";
+import type { AgentApproval, AgentEvent, AgentTask, DraftAttachment, QueueSnapshot } from "@openbot/contracts/ipc";
 import type { AppTextKey } from "@openbot/i18n";
 import {
   plainTaskTitle,
   TASKS_CLOSED_SHOWN,
   type TasksSectionId,
+  taskApproval,
   taskSections,
   taskTone,
 } from "@openbot/team-client/agent-tasks";
@@ -23,10 +24,12 @@ import {
 } from "@openbot/ui";
 import { createScrollFades } from "@openbot/ui/components/createScrollFades";
 import { PanelResizer } from "@openbot/ui/components/PanelResizer";
+import { QuestionPromptBubble } from "@openbot/ui/components/QuestionPromptBubble";
 import { SwapLabel, type SwapMotion } from "@openbot/ui/components/SwapLabel";
 import type { AgentProfile } from "@openbot/ui/data";
 import { AgentAvatar } from "@openbot/ui/features/agents/AgentAvatar";
 import { AgentTaskMark, type AgentTaskWait, agentTaskStatus } from "@openbot/ui/features/conversation/AgentTasks";
+import { ApprovalCard } from "@openbot/ui/features/conversation/ConversationPrompts";
 import {
   ComposerAttachmentRow,
   type ComposerPendingImage,
@@ -138,6 +141,39 @@ interface TasksPageProps {
   onSideResizeEnd: (width: number) => void;
   /** What the task's running turn waits for from the person: an approval, or an answer in the chat. */
   waitOf?: ((task: AgentTask) => AgentTaskWait) | undefined;
+  /** Waiting approvals across all agents/threads. */
+  approvals?: readonly AgentApproval[] | undefined;
+  onRespondApproval?: ((approval: AgentApproval, decision: "accept" | "decline") => Promise<boolean>) | undefined;
+  /** Pending questions and browser takeover requests across agents/threads. */
+  pendingPrompts?: Readonly<
+    Record<
+      string,
+      | Extract<AgentEvent, { type: "prompt" | "browser-takeover-requested" }>
+      | undefined
+    >
+  > | undefined;
+  activeTurns?: Readonly<Record<string, string | null>> | undefined;
+  turnProgress?: Readonly<
+    Record<string, { turnId: string; detail: string; running?: boolean; activity?: string } | undefined>
+  > | undefined;
+  queues?: Readonly<Record<string, QueueSnapshot>> | undefined;
+  onSelectAgentChat?: ((agentId: string) => void) | undefined;
+  onAnswerPrompt?: (
+    agentId: string,
+    threadId: string | undefined,
+    requestId: string | number,
+    answers: Record<string, string[]>,
+  ) => Promise<boolean>;
+  onRespondBrowserTakeover?: (
+    agentId: string,
+    threadId: string | undefined,
+    requestId: string,
+    decision: "complete" | "cancel",
+  ) => Promise<boolean>;
+  onQuickReplyTask?: ((task: AgentTask, text: string) => void) | undefined;
+  onArchiveTask?: ((task: AgentTask) => void) | undefined;
+  onReopenTask?: ((task: AgentTask) => void) | undefined;
+  onOpenInChat?: ((task: AgentTask) => void) | undefined;
   /** The user's send shortcut for the composer. */
   sendShortcut?: SendShortcut | undefined;
   /** The window draws the macOS window controls over the image viewer's top start corner. */
@@ -630,6 +666,867 @@ function TaskRow(props: {
   );
 }
 
+export type TasksHubViewMode = "kanban" | "gantt" | "list";
+export type GanttRangeKey = "6h" | "24h" | "7d" | "30d";
+
+const VIEW_MODE_STORAGE_KEY = "openbot:tasks-view-mode:v1";
+
+function readSavedViewMode(): TasksHubViewMode {
+  try {
+    const saved = window.localStorage.getItem(VIEW_MODE_STORAGE_KEY);
+    if (saved === "kanban" || saved === "gantt" || saved === "list") return saved;
+  } catch {
+    // ignore storage errors
+  }
+  return "kanban";
+}
+
+function saveViewMode(mode: TasksHubViewMode): void {
+  try {
+    window.localStorage.setItem(VIEW_MODE_STORAGE_KEY, mode);
+  } catch {
+    // ignore storage errors
+  }
+}
+
+function formatRelativeTimePt(isoOrMs: string | number | null | undefined): string {
+  if (!isoOrMs) return "";
+  const time = typeof isoOrMs === "number" ? isoOrMs : Date.parse(isoOrMs);
+  if (!Number.isFinite(time)) return "";
+  const diffSec = Math.max(0, Math.floor((Date.now() - time) / 1000));
+  if (diffSec < 60) return "agora";
+  const diffMin = Math.floor(diffSec / 60);
+  if (diffMin < 60) return `há ${diffMin}min`;
+  const diffHours = Math.floor(diffMin / 60);
+  if (diffHours < 24) return `há ${diffHours}h`;
+  const diffDays = Math.floor(diffHours / 24);
+  return `há ${diffDays}d`;
+}
+
+function formatDurationPt(startMs: number, endMs: number): string {
+  const sec = Math.max(1, Math.floor((endMs - startMs) / 1000));
+  if (sec < 60) return `${sec}s`;
+  const min = Math.floor(sec / 60);
+  if (min < 60) return `${min}m ${sec % 60}s`;
+  const hrs = Math.floor(min / 60);
+  if (hrs < 24) return `${hrs}h ${min % 60}m`;
+  const days = Math.floor(hrs / 24);
+  return `${days}d ${hrs % 24}h`;
+}
+
+interface UnifiedAttentionEntry {
+  key: string;
+  agentId: string;
+  threadId?: string | undefined;
+  task?: AgentTask | undefined;
+  kind: "approval" | "question" | "browser-takeover" | "task-wait";
+  approval?: AgentApproval | undefined;
+  promptEvent?: Extract<AgentEvent, { type: "prompt" }> | undefined;
+  takeoverEvent?: Extract<AgentEvent, { type: "browser-takeover-requested" }> | undefined;
+}
+
+function collectAttentionEntries(
+  props: TasksPageProps,
+  filterAgentId: string,
+  searchQuery: string,
+): UnifiedAttentionEntry[] {
+  const entries: UnifiedAttentionEntry[] = [];
+  const seenKeys = new Set<string>();
+  const query = searchQuery.trim().toLowerCase();
+
+  const matchesFilter = (agentId: string, text: string) => {
+    if (filterAgentId && agentId !== filterAgentId) return false;
+    if (!query) return true;
+    const agentName = agentOf(props.agents, agentId)?.name?.toLowerCase() ?? "";
+    return text.toLowerCase().includes(query) || agentName.includes(query);
+  };
+
+  for (const approval of props.approvals ?? []) {
+    const task = props.tasks.find(
+      (candidate) => candidate.agentId === approval.agentId && candidate.threadId === approval.threadId,
+    );
+    const key = `approval:${approval.agentId}:${String(approval.requestId)}`;
+    if (!matchesFilter(approval.agentId, `${approval.command ?? ""} ${task?.title ?? ""}`)) continue;
+    seenKeys.add(key);
+    if (task) seenKeys.add(`task:${task.id}`);
+    entries.push({
+      key,
+      agentId: approval.agentId,
+      threadId: approval.threadId ?? undefined,
+      task,
+      kind: "approval",
+      approval,
+    });
+  }
+
+  for (const [attKey, event] of Object.entries(props.pendingPrompts ?? {})) {
+    if (!event) continue;
+    const [agentIdFromKey, threadIdFromKey] = attKey.split("\0");
+    const agentId = event.agentId || agentIdFromKey || "";
+    const threadId = event.threadId ?? threadIdFromKey ?? undefined;
+    const task = props.tasks.find(
+      (candidate) => candidate.agentId === agentId && threadId && candidate.threadId === threadId,
+    );
+    if (event.type === "prompt") {
+      const qText = event.questions.map((q) => q.question).join(" ");
+      if (!matchesFilter(agentId, `${qText} ${task?.title ?? ""}`)) continue;
+      const key = `prompt:${agentId}:${String(event.requestId)}`;
+      seenKeys.add(key);
+      if (task) seenKeys.add(`task:${task.id}`);
+      entries.push({
+        key,
+        agentId,
+        threadId,
+        task,
+        kind: "question",
+        promptEvent: event,
+      });
+    } else if (event.type === "browser-takeover-requested") {
+      if (!matchesFilter(agentId, `${event.request.instructions} ${event.request.url ?? ""} ${task?.title ?? ""}`))
+        continue;
+      const key = `takeover:${agentId}:${event.request.requestId}`;
+      seenKeys.add(key);
+      if (task) seenKeys.add(`task:${task.id}`);
+      entries.push({
+        key,
+        agentId,
+        threadId,
+        task,
+        kind: "browser-takeover",
+        takeoverEvent: event,
+      });
+    }
+  }
+
+  for (const task of props.tasks) {
+    const wait = props.waitOf?.(task);
+    if (!wait || seenKeys.has(`task:${task.id}`)) continue;
+    if (!matchesFilter(task.agentId, `${task.title} ${task.latestPreview ?? ""}`)) continue;
+    entries.push({
+      key: `task:${task.id}`,
+      agentId: task.agentId,
+      threadId: task.threadId,
+      task,
+      kind: "task-wait",
+      approval: props.approvals ? taskApproval(task, props.approvals) : undefined,
+    });
+  }
+
+  return entries;
+}
+
+function AttentionActionCard(props: {
+  entry: UnifiedAttentionEntry;
+  pageProps: TasksPageProps;
+}) {
+  const agent = () => agentOf(props.pageProps.agents, props.entry.agentId);
+  const [busy, setBusy] = createSignal(false);
+  return (
+    <div class="tasks-hub-card tasks-hub-card-attention">
+      <div class="tasks-hub-card-top">
+        <span class="tasks-hub-agent-pill">
+          <AgentAvatar agent={agent()} class="tasks-page-avatar" />
+          <strong>{agent()?.name ?? props.entry.agentId}</strong>
+        </span>
+        <span class="tasks-hub-badge" data-tone="attention">
+          {props.entry.kind === "approval"
+            ? "🚨 Pede Permissão"
+            : props.entry.kind === "question"
+              ? "❓ Pergunta p/ Você"
+              : props.entry.kind === "browser-takeover"
+                ? "🌐 Assumir Navegador"
+                : "⏳ Depende de Você"}
+        </span>
+      </div>
+
+      <Show when={props.entry.task}>
+        {(task) => (
+          <button
+            type="button"
+            class="tasks-hub-card-title-btn"
+            onClick={() => props.pageProps.onSelect(task().id)}
+          >
+            {task().title}
+          </button>
+        )}
+      </Show>
+
+      <Show when={props.entry.approval}>
+        {(approval) => (
+          <div class="tasks-hub-inline-prompt">
+            <ApprovalCard
+              approval={approval()}
+              onApprove={() => {
+                if (!props.pageProps.onRespondApproval) return;
+                setBusy(true);
+                void props.pageProps.onRespondApproval(approval(), "accept").finally(() => setBusy(false));
+              }}
+              onReject={() => {
+                if (!props.pageProps.onRespondApproval) return;
+                setBusy(true);
+                void props.pageProps.onRespondApproval(approval(), "decline").finally(() => setBusy(false));
+              }}
+            />
+          </div>
+        )}
+      </Show>
+
+      <Show when={props.entry.promptEvent}>
+        {(promptEvent) => (
+          <div class="tasks-hub-inline-prompt">
+            <QuestionPromptBubble
+              questions={promptEvent().questions}
+              sendShortcut={props.pageProps.sendShortcut}
+              onSubmit={async (answers) => {
+                if (!props.pageProps.onAnswerPrompt) return false;
+                setBusy(true);
+                try {
+                  return await props.pageProps.onAnswerPrompt(
+                    props.entry.agentId,
+                    props.entry.threadId,
+                    promptEvent().requestId,
+                    answers,
+                  );
+                } finally {
+                  setBusy(false);
+                }
+              }}
+            />
+          </div>
+        )}
+      </Show>
+
+      <Show when={props.entry.takeoverEvent}>
+        {(takeover) => (
+          <div class="tasks-hub-takeover-box">
+            <p class="tasks-hub-card-preview">{takeover().request.instructions}</p>
+            <Show when={takeover().request.url}>
+              {(url) => <span class="tasks-hub-url-chip">{url()}</span>}
+            </Show>
+            <div class="tasks-hub-card-actions">
+              <Button
+                type="button"
+                variant="primary"
+                size="xs"
+                loading={busy()}
+                onClick={() => {
+                  if (!props.pageProps.onRespondBrowserTakeover) return;
+                  setBusy(true);
+                  void props.pageProps
+                    .onRespondBrowserTakeover(
+                      props.entry.agentId,
+                      props.entry.threadId,
+                      takeover().request.requestId,
+                      "complete",
+                    )
+                    .finally(() => setBusy(false));
+                }}
+              >
+                ✅ Já resolvi, pode seguir
+              </Button>
+              <Button
+                type="button"
+                variant="secondary"
+                size="xs"
+                onClick={() => {
+                  if (props.entry.task && props.pageProps.onOpenInChat) {
+                    props.pageProps.onOpenInChat(props.entry.task);
+                  } else {
+                    props.pageProps.onSelectAgentChat?.(props.entry.agentId);
+                  }
+                }}
+              >
+                🖐 Abrir Navegador / Chat
+              </Button>
+            </div>
+          </div>
+        )}
+      </Show>
+
+      <Show
+        when={
+          !props.entry.approval &&
+          !props.entry.promptEvent &&
+          !props.entry.takeoverEvent &&
+          props.entry.task
+        }
+      >
+        {(task) => (
+          <div class="tasks-hub-takeover-box">
+            <Show when={task().latestPreview}>
+              <p class="tasks-hub-card-preview">{task().latestPreview}</p>
+            </Show>
+            <div class="tasks-hub-card-actions">
+              <Button
+                type="button"
+                variant="primary"
+                size="xs"
+                onClick={() => props.pageProps.onSelect(task().id)}
+              >
+                💬 Ver & Responder
+              </Button>
+              <Show when={props.pageProps.onOpenInChat}>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="xs"
+                  onClick={() => props.pageProps.onOpenInChat?.(task())}
+                >
+                  Abrir no Chat
+                </Button>
+              </Show>
+            </div>
+          </div>
+        )}
+      </Show>
+    </div>
+  );
+}
+
+function KanbanTaskCard(props: {
+  task: AgentTask;
+  pageProps: TasksPageProps;
+  column: "queued" | "running" | "delivered";
+}) {
+  const { t } = useText();
+  const agent = () => agentOf(props.pageProps.agents, props.task.agentId);
+  const wait = () => props.pageProps.waitOf?.(props.task);
+  const status = () => agentTaskStatus(props.task, t, wait());
+  const progress = () => props.pageProps.turnProgress?.[props.task.agentId];
+  const [replyOpen, setReplyOpen] = createSignal(false);
+  const [replyText, setReplyText] = createSignal("");
+
+  const submitQuickReply = (text: string) => {
+    const trimmed = text.trim();
+    if (!trimmed) return;
+    props.pageProps.onQuickReplyTask?.(props.task, trimmed);
+    setReplyText("");
+    setReplyOpen(false);
+  };
+
+  return (
+    <div
+      class="tasks-hub-card"
+      data-selected={props.pageProps.selectedId === props.task.id ? "" : undefined}
+      data-closed={props.task.state === "closed" ? "" : undefined}
+    >
+      <div class="tasks-hub-card-top">
+        <span class="tasks-hub-agent-pill">
+          <AgentAvatar agent={agent()} class="tasks-page-avatar" />
+          <strong>{agent()?.name ?? props.task.agentId}</strong>
+        </span>
+        <span class="tasks-hub-time">{formatRelativeTimePt(props.task.updatedAt || props.task.createdAt)}</span>
+      </div>
+
+      <button
+        type="button"
+        class="tasks-hub-card-title-btn"
+        onClick={() =>
+          props.pageProps.onSelect(props.pageProps.selectedId === props.task.id ? null : props.task.id)
+        }
+      >
+        <AgentTaskMark task={props.task} decorative />
+        <span>{props.task.title}</span>
+      </button>
+
+      <Show when={props.column === "running" && progress()?.detail}>
+        {(detail) => (
+          <div class="tasks-hub-live-step">
+            <LoaderCircle class="tasks-hub-spin" aria-hidden="true" />
+            <span>{detail()}</span>
+          </div>
+        )}
+      </Show>
+
+      <Show when={props.task.latestPreview}>
+        {(preview) => <p class="tasks-hub-card-preview">{preview()}</p>}
+      </Show>
+
+      <div class="tasks-hub-card-footer">
+        <span class="tasks-page-status" data-tone={wait() ? "attention" : taskTone(props.task)}>
+          {status()}
+        </span>
+        <div class="tasks-hub-card-actions">
+          <Button
+            type="button"
+            variant="ghost"
+            size="xs"
+            onClick={() =>
+              props.pageProps.onSelect(props.pageProps.selectedId === props.task.id ? null : props.task.id)
+            }
+          >
+            {props.pageProps.selectedId === props.task.id ? "Fechar painel" : "Ver entrega"}
+          </Button>
+          <Show when={props.column === "delivered" && props.task.state !== "closed"}>
+            <Button
+              type="button"
+              variant="secondary"
+              size="xs"
+              title="Aprovar a entrega do bot e arquivar a tarefa como concluída"
+              onClick={() => props.pageProps.onArchiveTask?.(props.task)}
+            >
+              ✅ Aprovar
+            </Button>
+          </Show>
+          <Show when={props.task.state !== "closed" && props.pageProps.onQuickReplyTask}>
+            <Button
+              type="button"
+              variant="ghost"
+              size="xs"
+              onClick={() => setReplyOpen((open) => !open)}
+            >
+              ✏️ Ajustar
+            </Button>
+          </Show>
+          <Show when={props.task.state === "closed" && props.pageProps.onReopenTask}>
+            <Button
+              type="button"
+              variant="ghost"
+              size="xs"
+              onClick={() => props.pageProps.onReopenTask?.(props.task)}
+            >
+              🔄 Reabrir
+            </Button>
+          </Show>
+        </div>
+      </div>
+
+      <Show when={replyOpen()}>
+        <form
+          class="tasks-hub-quick-reply"
+          onSubmit={(event) => {
+            event.preventDefault();
+            submitQuickReply(replyText());
+          }}
+        >
+          <input
+            type="text"
+            class="tasks-hub-quick-reply-input"
+            placeholder={`Passar instrução para ${agent()?.name ?? "o bot"}...`}
+            value={replyText()}
+            onInput={(event) => setReplyText(event.currentTarget.value)}
+          />
+          <Button type="submit" variant="primary" size="xs">
+            Enviar
+          </Button>
+        </form>
+      </Show>
+    </div>
+  );
+}
+
+function TasksKanbanBoard(props: {
+  pageProps: TasksPageProps;
+  filteredTasks: readonly AgentTask[];
+  attentionEntries: readonly UnifiedAttentionEntry[];
+  filterAgentId: string;
+}) {
+  const waitOf = (task: AgentTask) => props.pageProps.waitOf?.(task);
+
+  const queuedTasks = createMemo(() =>
+    props.filteredTasks.filter((task) => task.state === "queued" && !waitOf(task)),
+  );
+  const runningTasks = createMemo(() =>
+    props.filteredTasks.filter((task) => task.state === "running" && !waitOf(task)),
+  );
+  const deliveredTasks = createMemo(() =>
+    props.filteredTasks.filter((task) => (task.state === "idle" || task.state === "closed") && !waitOf(task)),
+  );
+
+  // Agents actively working in their main chat (outside a task thread) so nothing is hidden!
+  const activeMainChatAgents = createMemo(() =>
+    props.pageProps.agents.filter((agent) => {
+      if (props.filterAgentId && agent.id !== props.filterAgentId) return false;
+      const turnId = props.pageProps.activeTurns?.[agent.id];
+      if (!turnId) return false;
+      const hasRunningTask = runningTasks().some((task) => task.agentId === agent.id);
+      return !hasRunningTask;
+    }),
+  );
+
+  // Agents with queued messages in their main chat
+  const queuedMainChatAgents = createMemo(() =>
+    props.pageProps.agents.filter((agent) => {
+      if (props.filterAgentId && agent.id !== props.filterAgentId) return false;
+      const deliveries = props.pageProps.queues?.[agent.id]?.deliveries ?? [];
+      return deliveries.length > 0;
+    }),
+  );
+
+  return (
+    <div class="tasks-kanban-grid">
+      {/* Column 1: Depende de Mim / Aprovação */}
+      <section class="tasks-kanban-col" data-col="attention">
+        <header class="tasks-kanban-col-header">
+          <span class="tasks-kanban-col-dot" data-tone="attention" />
+          <h3>Depende de Mim</h3>
+          <span class="tasks-page-count">{props.attentionEntries.length}</span>
+        </header>
+        <div class="tasks-kanban-col-body">
+          <Show
+            when={props.attentionEntries.length > 0}
+            fallback={
+              <div class="tasks-kanban-empty">
+                🎉 Nenhum bot travado esperando aprovação ou resposta sua agora.
+              </div>
+            }
+          >
+            <For each={props.attentionEntries}>
+              {(entry) => <AttentionActionCard entry={entry()} pageProps={props.pageProps} />}
+            </For>
+          </Show>
+        </div>
+      </section>
+
+      {/* Column 2: Na Fila / Aguardando */}
+      <section class="tasks-kanban-col" data-col="queued">
+        <header class="tasks-kanban-col-header">
+          <span class="tasks-kanban-col-dot" data-tone="queued" />
+          <h3>Na Fila</h3>
+          <span class="tasks-page-count">{queuedTasks().length + queuedMainChatAgents().length}</span>
+        </header>
+        <div class="tasks-kanban-col-body">
+          <Show
+            when={queuedTasks().length > 0 || queuedMainChatAgents().length > 0}
+            fallback={<div class="tasks-kanban-empty">Nenhuma tarefa aguardando na fila.</div>}
+          >
+            <For each={queuedMainChatAgents()}>
+              {(agent) => {
+                const deliveries = () => props.pageProps.queues?.[agent().id]?.deliveries ?? [];
+                return (
+                  <div class="tasks-hub-card">
+                    <div class="tasks-hub-card-top">
+                      <span class="tasks-hub-agent-pill">
+                        <AgentAvatar agent={agent()} class="tasks-page-avatar" />
+                        <strong>{agent().name}</strong>
+                      </span>
+                      <span class="tasks-hub-badge" data-tone="queued">
+                        {deliveries().length} na fila do chat
+                      </span>
+                    </div>
+                    <p class="tasks-hub-card-preview">{deliveries()[0]?.text ?? "Mensagem aguardando turno"}</p>
+                    <div class="tasks-hub-card-actions">
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="xs"
+                        onClick={() => props.pageProps.onSelectAgentChat?.(agent().id)}
+                      >
+                        Abrir Chat
+                      </Button>
+                    </div>
+                  </div>
+                );
+              }}
+            </For>
+            <For each={queuedTasks()}>
+              {(task) => <KanbanTaskCard task={task()} pageProps={props.pageProps} column="queued" />}
+            </For>
+          </Show>
+        </div>
+      </section>
+
+      {/* Column 3: Fazendo Agora (Em Execução) */}
+      <section class="tasks-kanban-col" data-col="running">
+        <header class="tasks-kanban-col-header">
+          <span class="tasks-kanban-col-dot" data-tone="working" />
+          <h3>Fazendo Agora</h3>
+          <span class="tasks-page-count">{runningTasks().length + activeMainChatAgents().length}</span>
+        </header>
+        <div class="tasks-kanban-col-body">
+          <Show
+            when={runningTasks().length > 0 || activeMainChatAgents().length > 0}
+            fallback={<div class="tasks-kanban-empty">Nenhum bot executando tarefa neste instante.</div>}
+          >
+            <For each={activeMainChatAgents()}>
+              {(agent) => {
+                const prog = () => props.pageProps.turnProgress?.[agent().id];
+                return (
+                  <div class="tasks-hub-card tasks-hub-card-running">
+                    <div class="tasks-hub-card-top">
+                      <span class="tasks-hub-agent-pill">
+                        <AgentAvatar agent={agent()} class="tasks-page-avatar" />
+                        <strong>{agent().name}</strong>
+                      </span>
+                      <span class="tasks-hub-badge" data-tone="working">
+                        ⚡ Ativo no Chat
+                      </span>
+                    </div>
+                    <div class="tasks-hub-live-step">
+                      <LoaderCircle class="tasks-hub-spin" aria-hidden="true" />
+                      <span>{prog()?.detail || prog()?.activity || "Executando turno no chat principal..."}</span>
+                    </div>
+                    <div class="tasks-hub-card-actions">
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="xs"
+                        onClick={() => props.pageProps.onSelectAgentChat?.(agent().id)}
+                      >
+                        Acompanhar no Chat
+                      </Button>
+                    </div>
+                  </div>
+                );
+              }}
+            </For>
+            <For each={runningTasks()}>
+              {(task) => <KanbanTaskCard task={task()} pageProps={props.pageProps} column="running" />}
+            </For>
+          </Show>
+        </div>
+      </section>
+
+      {/* Column 4: Entregue / Concluído */}
+      <section class="tasks-kanban-col" data-col="delivered">
+        <header class="tasks-kanban-col-header">
+          <span class="tasks-kanban-col-dot" data-tone="delivered" />
+          <h3>Entregues & Concluídos</h3>
+          <span class="tasks-page-count">{deliveredTasks().length}</span>
+        </header>
+        <div class="tasks-kanban-col-body">
+          <Show
+            when={deliveredTasks().length > 0}
+            fallback={<div class="tasks-kanban-empty">Nenhuma entrega concluída ainda.</div>}
+          >
+            <For each={deliveredTasks()}>
+              {(task) => <KanbanTaskCard task={task()} pageProps={props.pageProps} column="delivered" />}
+            </For>
+          </Show>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+const GANTT_RANGE_MS: Record<GanttRangeKey, number> = {
+  "6h": 6 * 3600 * 1000,
+  "24h": 24 * 3600 * 1000,
+  "7d": 7 * 24 * 3600 * 1000,
+  "30d": 30 * 24 * 3600 * 1000,
+};
+
+function TasksGanttTimeline(props: {
+  pageProps: TasksPageProps;
+  filteredTasks: readonly AgentTask[];
+  attentionEntries: readonly UnifiedAttentionEntry[];
+  filterAgentId: string;
+}) {
+  const [range, setRange] = createSignal<GanttRangeKey>("24h");
+  const nowMs = () => Date.now();
+  const spanMs = () => GANTT_RANGE_MS[range()];
+  const startWindowMs = () => nowMs() - spanMs();
+
+  const ticks = createMemo(() => {
+    const start = startWindowMs();
+    const span = spanMs();
+    const count = 6;
+    const list: { pct: number; label: string }[] = [];
+    for (let i = 0; i <= count; i++) {
+      const tMs = start + (span * i) / count;
+      const date = new Date(tMs);
+      const label =
+        range() === "6h" || range() === "24h"
+          ? date.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })
+          : date.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" });
+      list.push({ pct: (i / count) * 100, label });
+    }
+    return list;
+  });
+
+  const rowsByAgent = createMemo(() => {
+    const windowStart = startWindowMs();
+    const currentNow = nowMs();
+    const agents = props.filterAgentId
+      ? props.pageProps.agents.filter((a) => a.id === props.filterAgentId)
+      : props.pageProps.agents;
+
+    return agents
+      .map((agent) => {
+        const agentTasks = props.filteredTasks.filter((task) => {
+          if (task.agentId !== agent.id) return false;
+          const end =
+            task.state === "running" || task.state === "queued"
+              ? currentNow
+              : Date.parse(task.closedAt || task.updatedAt || task.createdAt);
+          return !Number.isFinite(end) || end >= windowStart;
+        });
+        const isWorkingMain = Boolean(props.pageProps.activeTurns?.[agent.id]);
+        const hasAttention = props.attentionEntries.some((entry) => entry.agentId === agent.id);
+        return {
+          agent,
+          tasks: agentTasks,
+          isWorkingMain,
+          hasAttention,
+        };
+      })
+      .filter((group) => group.tasks.length > 0 || group.isWorkingMain || group.hasAttention);
+  });
+
+  const barGeometry = (task: AgentTask) => {
+    const windowStart = startWindowMs();
+    const currentNow = nowMs();
+    const span = spanMs();
+    const rawStart = Date.parse(task.createdAt);
+    const start = Number.isFinite(rawStart) ? rawStart : currentNow - 15 * 60 * 1000;
+    const rawEnd =
+      task.state === "running" || task.state === "queued"
+        ? currentNow
+        : Date.parse(task.closedAt || task.updatedAt || task.createdAt);
+    const end = Number.isFinite(rawEnd) ? Math.max(start + 60_000, rawEnd) : currentNow;
+
+    const clampedStart = Math.max(windowStart, Math.min(currentNow, start));
+    const clampedEnd = Math.max(clampedStart, Math.min(currentNow, end));
+    const leftPct = ((clampedStart - windowStart) / span) * 100;
+    const widthPct = Math.max(2.5, ((clampedEnd - clampedStart) / span) * 100);
+    return {
+      left: `${Math.min(97.5, Math.max(0, leftPct))}%`,
+      width: `${Math.min(100 - leftPct, widthPct)}%`,
+      durationLabel: formatDurationPt(start, end),
+    };
+  };
+
+  return (
+    <div class="tasks-gantt-wrap">
+      <div class="tasks-gantt-toolbar">
+        <span class="tasks-gantt-toolbar-title">Linha do Tempo de Execução & Entregas por Bot</span>
+        <div class="tasks-gantt-range-group" role="group" aria-label="Período do gráfico de Gantt">
+          {(["6h", "24h", "7d", "30d"] as const).map((key) => (
+            <Button
+              type="button"
+              variant={range() === key ? "secondary" : "ghost"}
+              size="xs"
+              onClick={() => setRange(key)}
+            >
+              {key === "6h" ? "Últimas 6h" : key === "24h" ? "Hoje (24h)" : key === "7d" ? "7 Dias" : "30 Dias"}
+            </Button>
+          ))}
+        </div>
+      </div>
+
+      <div class="tasks-gantt-legend">
+        <span>
+          <i class="tasks-gantt-dot" data-tone="attention" /> Depende de Você
+        </span>
+        <span>
+          <i class="tasks-gantt-dot" data-tone="working" /> Fazendo Agora
+        </span>
+        <span>
+          <i class="tasks-gantt-dot" data-tone="queued" /> Na Fila
+        </span>
+        <span>
+          <i class="tasks-gantt-dot" data-tone="delivered" /> Entregue / Concluído
+        </span>
+      </div>
+
+      <div class="tasks-gantt-board">
+        <div class="tasks-gantt-axis">
+          <div class="tasks-gantt-agent-col-header">Bot / Tarefa</div>
+          <div class="tasks-gantt-track-header">
+            <For each={ticks()}>
+              {(tick) => (
+                <span class="tasks-gantt-tick" style={{ left: `${tick().pct}%` }}>
+                  {tick().label}
+                </span>
+              )}
+            </For>
+            <span class="tasks-gantt-now-badge">AGORA</span>
+          </div>
+        </div>
+
+        <Show
+          when={rowsByAgent().length > 0}
+          fallback={
+            <div class="tasks-kanban-empty">
+              Nenhuma tarefa registrada neste período. Amplie o período para 7d ou 30d acima.
+            </div>
+          }
+        >
+          <For each={rowsByAgent()}>
+            {(group) => (
+              <div class="tasks-gantt-group">
+                <div class="tasks-gantt-group-header">
+                  <button
+                    type="button"
+                    class="tasks-gantt-agent-btn"
+                    onClick={() => props.pageProps.onSelectAgentChat?.(group().agent.id)}
+                  >
+                    <AgentAvatar agent={group().agent} class="tasks-page-avatar" />
+                    <strong>{group().agent.name}</strong>
+                    <Show when={group().hasAttention}>
+                      <span class="tasks-hub-badge" data-tone="attention">
+                        🚨 Depende de você
+                      </span>
+                    </Show>
+                    <Show when={group().isWorkingMain}>
+                      <span class="tasks-hub-badge" data-tone="working">
+                        ⚡ Em execução
+                      </span>
+                    </Show>
+                  </button>
+                </div>
+
+                <For each={group().tasks}>
+                  {(task) => {
+                    const wait = () => props.pageProps.waitOf?.(task());
+                    const geom = () => barGeometry(task());
+                    const tone = () =>
+                      wait()
+                        ? "attention"
+                        : task().state === "running"
+                          ? "working"
+                          : task().state === "queued"
+                            ? "queued"
+                            : "delivered";
+                    return (
+                      <div
+                        class="tasks-gantt-row"
+                        data-selected={props.pageProps.selectedId === task().id ? "" : undefined}
+                      >
+                        <button
+                          type="button"
+                          class="tasks-gantt-row-label"
+                          title={task().title}
+                          onClick={() =>
+                            props.pageProps.onSelect(
+                              props.pageProps.selectedId === task().id ? null : task().id,
+                            )
+                          }
+                        >
+                          <AgentTaskMark task={task()} decorative />
+                          <span class="tasks-gantt-row-title">{task().title}</span>
+                        </button>
+                        <div class="tasks-gantt-track">
+                          <button
+                            type="button"
+                            class="tasks-gantt-bar"
+                            data-tone={tone()}
+                            style={{ left: geom().left, width: geom().width }}
+                            title={`${task().title} (${geom().durationLabel})${task().latestPreview ? ` — ${task().latestPreview}` : ""}`}
+                            onClick={() =>
+                              props.pageProps.onSelect(
+                                props.pageProps.selectedId === task().id ? null : task().id,
+                              )
+                            }
+                          >
+                            <span class="tasks-gantt-bar-text">
+                              {task().title} · {geom().durationLabel}
+                            </span>
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  }}
+                </For>
+              </div>
+            )}
+          </For>
+        </Show>
+      </div>
+    </div>
+  );
+}
+
 const SECTION_TITLE = {
   needsYou: "conversation.tasks.section.needsYou",
   working: "conversation.tasks.section.working",
@@ -640,62 +1537,101 @@ const SECTION_TITLE = {
 } as const satisfies Record<TasksSectionId, AppTextKey>;
 
 /** The tasks by what they need, each section with its heading. The archived tasks are faded. */
-function TasksList(props: TasksPageProps) {
+function TasksList(props: {
+  pageProps: TasksPageProps;
+  filteredTasks: readonly AgentTask[];
+  attentionEntries: readonly UnifiedAttentionEntry[];
+}) {
   const { t } = useText();
   const ids = createUniqueId();
   const [view, setView] = createStore({ showAllClosed: false });
-  const waitOf = (task: AgentTask) => props.waitOf?.(task);
-  const sections = () => taskSections(props.tasks, view.showAllClosed, undefined, (task) => waitOf(task) !== undefined);
+  const waitOf = (task: AgentTask) => props.pageProps.waitOf?.(task);
+  const sections = () =>
+    taskSections(props.filteredTasks, view.showAllClosed, undefined, (task) => waitOf(task) !== undefined);
   return (
-    <For each={sections()} keyed={(section) => section.id}>
-      {(section) => (
-        <Show when={section().tasks.length > 0}>
-          <section
-            class="tasks-page-section"
-            data-closed={section().id === "closed" ? "" : undefined}
-            aria-labelledby={`${ids}-${section().id}`}
-          >
-            <h3 id={`${ids}-${section().id}`} class="tasks-page-section-heading">
-              <span>{t(SECTION_TITLE[section().id])}</span>
-              <span class="tasks-page-count">{section().count}</span>
-            </h3>
-            <ul class="tasks-page-list">
-              <For each={section().tasks} keyed={(task) => task.id}>
-                {(task) => (
-                  <li data-arrived={props.took?.task.id === task().id ? "" : undefined}>
-                    <TaskRow
-                      task={task()}
-                      agent={agentOf(props.agents, task().agentId)}
-                      selected={props.selectedId === task().id}
-                      wait={waitOf(task())}
-                      onOpen={() => props.onSelect(props.selectedId === task().id ? null : task().id)}
-                    />
-                  </li>
-                )}
-              </For>
-            </ul>
-            <Show when={section().id === "closed" && section().count > TASKS_CLOSED_SHOWN}>
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                class="tasks-page-show-all"
-                aria-expanded={view.showAllClosed ? "true" : "false"}
-                onClick={() =>
-                  setView((draft) => {
-                    draft.showAllClosed = !draft.showAllClosed;
-                  })
-                }
-              >
-                {view.showAllClosed
-                  ? t("conversation.tasks.showLess")
-                  : t("conversation.tasks.showAll", { count: section().count })}
-              </Button>
-            </Show>
-          </section>
-        </Show>
-      )}
-    </For>
+    <div class="tasks-list-enhanced">
+      <Show when={props.attentionEntries.length > 0}>
+        <section class="tasks-hub-urgent-banner" aria-label="Pendências que dependem de você">
+          <header class="tasks-hub-urgent-header">
+            <strong>🚨 Central de Aprovação Rápida — Depende de Você ({props.attentionEntries.length})</strong>
+            <span>Aprove ferramentas, responda dúvidas ou assuma o navegador sem precisar entrar em cada chat</span>
+          </header>
+          <div class="tasks-hub-urgent-grid">
+            <For each={props.attentionEntries}>
+              {(entry) => <AttentionActionCard entry={entry()} pageProps={props.pageProps} />}
+            </For>
+          </div>
+        </section>
+      </Show>
+
+      <For each={sections()} keyed={(section) => section.id}>
+        {(section) => (
+          <Show when={section().tasks.length > 0}>
+            <section
+              class="tasks-page-section"
+              data-closed={section().id === "closed" ? "" : undefined}
+              aria-labelledby={`${ids}-${section().id}`}
+            >
+              <h3 id={`${ids}-${section().id}`} class="tasks-page-section-heading">
+                <span>{t(SECTION_TITLE[section().id])}</span>
+                <span class="tasks-page-count">{section().count}</span>
+              </h3>
+              <ul class="tasks-page-list">
+                <For each={section().tasks} keyed={(task) => task.id}>
+                  {(task) => (
+                    <li data-arrived={props.pageProps.took?.task.id === task().id ? "" : undefined}>
+                      <div class="tasks-page-row-enhanced">
+                        <TaskRow
+                          task={task()}
+                          agent={agentOf(props.pageProps.agents, task().agentId)}
+                          selected={props.pageProps.selectedId === task().id}
+                          wait={waitOf(task())}
+                          onOpen={() =>
+                            props.pageProps.onSelect(
+                              props.pageProps.selectedId === task().id ? null : task().id,
+                            )
+                          }
+                        />
+                        <Show when={task().state === "idle" && props.pageProps.onArchiveTask}>
+                          <Button
+                            type="button"
+                            variant="secondary"
+                            size="xs"
+                            class="tasks-row-quick-approve"
+                            title="Aprovar entrega e concluir tarefa"
+                            onClick={() => props.pageProps.onArchiveTask?.(task())}
+                          >
+                            ✅ Aprovar
+                          </Button>
+                        </Show>
+                      </div>
+                    </li>
+                  )}
+                </For>
+              </ul>
+              <Show when={section().id === "closed" && section().count > TASKS_CLOSED_SHOWN}>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  class="tasks-page-show-all"
+                  aria-expanded={view.showAllClosed ? "true" : "false"}
+                  onClick={() =>
+                    setView((draft) => {
+                      draft.showAllClosed = !draft.showAllClosed;
+                    })
+                  }
+                >
+                  {view.showAllClosed
+                    ? t("conversation.tasks.showLess")
+                    : t("conversation.tasks.showAll", { count: section().count })}
+                </Button>
+              </Show>
+            </section>
+          </Show>
+        )}
+      </For>
+    </div>
   );
 }
 
@@ -852,10 +1788,63 @@ function TasksSidePanel(props: {
 export function TasksPage(props: TasksPageProps) {
   const { t } = useText();
   const headingId = createUniqueId();
+  const [viewMode, setViewMode] = createSignal<TasksHubViewMode>(readSavedViewMode());
+  const [filterAgentId, setFilterAgentId] = createSignal<string>("");
+  const [searchQuery, setSearchQuery] = createSignal<string>("");
+
+  const changeViewMode = (mode: TasksHubViewMode) => {
+    setViewMode(mode);
+    saveViewMode(mode);
+  };
+
+  const attentionEntries = createMemo(() =>
+    collectAttentionEntries(props, filterAgentId(), searchQuery()),
+  );
+
+  const filteredTasks = createMemo(() => {
+    const agentFilter = filterAgentId();
+    const query = searchQuery().trim().toLowerCase();
+    return props.tasks.filter((task) => {
+      if (agentFilter && task.agentId !== agentFilter) return false;
+      if (!query) return true;
+      const agentName = agentOf(props.agents, task.agentId)?.name?.toLowerCase() ?? "";
+      return (
+        task.title.toLowerCase().includes(query) ||
+        (task.latestPreview?.toLowerCase().includes(query) ?? false) ||
+        agentName.includes(query)
+      );
+    });
+  });
+
+  const runningCount = createMemo(
+    () =>
+      filteredTasks().filter((task) => task.state === "running").length +
+      props.agents.filter((a) => Boolean(props.activeTurns?.[a.id])).length,
+  );
+  const queuedCount = createMemo(
+    () =>
+      filteredTasks().filter((task) => task.state === "queued").length +
+      props.agents.reduce((sum, a) => sum + (props.queues?.[a.id]?.deliveries?.length ?? 0), 0),
+  );
+  const deliveredCount = createMemo(
+    () => filteredTasks().filter((task) => task.state === "idle" || task.state === "closed").length,
+  );
+
   // The first start adds a task that waits, so the page shows the list as soon as the user sends.
-  const empty = () => props.loaded === true && props.tasks.length === 0;
+  const empty = () =>
+    props.loaded === true &&
+    props.tasks.length === 0 &&
+    attentionEntries().length === 0 &&
+    runningCount() === 0 &&
+    queuedCount() === 0;
+
   return (
-    <section class="tasks-page" aria-labelledby={headingId} data-empty={empty() ? "" : undefined}>
+    <section
+      class="tasks-page"
+      aria-labelledby={headingId}
+      data-empty={empty() ? "" : undefined}
+      data-view-mode={viewMode()}
+    >
       <div class="tasks-page-scroll">
         <div class="tasks-page-column">
           <PageHeader
@@ -873,8 +1862,132 @@ export function TasksPage(props: TasksPageProps) {
           <div class="tasks-page-took-slot" aria-live="polite">
             <Show when={props.took}>{(took) => <TaskTookLine {...props} took={took()} />}</Show>
           </div>
-          <TasksList {...props} />
-          <Show when={empty()}>
+
+          <div class="tasks-hub-toolbar">
+            <div class="tasks-hub-toolbar-row">
+              <div class="tasks-hub-modes" role="tablist" aria-label="Visualização de Tarefas">
+                <Button
+                  type="button"
+                  variant={viewMode() === "kanban" ? "secondary" : "ghost"}
+                  size="sm"
+                  role="tab"
+                  aria-selected={viewMode() === "kanban" ? "true" : "false"}
+                  onClick={() => changeViewMode("kanban")}
+                >
+                  🗂️ Kanban
+                </Button>
+                <Button
+                  type="button"
+                  variant={viewMode() === "gantt" ? "secondary" : "ghost"}
+                  size="sm"
+                  role="tab"
+                  aria-selected={viewMode() === "gantt" ? "true" : "false"}
+                  onClick={() => changeViewMode("gantt")}
+                >
+                  📊 Gantt
+                </Button>
+                <Button
+                  type="button"
+                  variant={viewMode() === "list" ? "secondary" : "ghost"}
+                  size="sm"
+                  role="tab"
+                  aria-selected={viewMode() === "list" ? "true" : "false"}
+                  onClick={() => changeViewMode("list")}
+                >
+                  📋 Tarefas
+                </Button>
+              </div>
+
+              <div class="tasks-hub-kpis">
+                <span
+                  class="tasks-hub-kpi"
+                  data-tone={attentionEntries().length > 0 ? "attention" : "neutral"}
+                >
+                  🚨 <strong>{attentionEntries().length}</strong> Depende de Mim
+                </span>
+                <span class="tasks-hub-kpi" data-tone="working">
+                  ⚡ <strong>{runningCount()}</strong> Fazendo
+                </span>
+                <span class="tasks-hub-kpi" data-tone="queued">
+                  ⏳ <strong>{queuedCount()}</strong> Fila
+                </span>
+                <span class="tasks-hub-kpi" data-tone="delivered">
+                  ✅ <strong>{deliveredCount()}</strong> Entregues
+                </span>
+              </div>
+
+              <div class="tasks-hub-search">
+                <Search aria-hidden="true" />
+                <input
+                  type="search"
+                  placeholder="Buscar tarefa, entrega ou bot..."
+                  value={searchQuery()}
+                  onInput={(event) => setSearchQuery(event.currentTarget.value)}
+                />
+              </div>
+            </div>
+
+            <div class="tasks-hub-agents-bar" role="group" aria-label="Filtrar por Bot">
+              <Button
+                type="button"
+                variant={filterAgentId() === "" ? "secondary" : "ghost"}
+                size="xs"
+                onClick={() => setFilterAgentId("")}
+              >
+                Todos os Bots ({props.agents.length})
+              </Button>
+              <For each={props.agents}>
+                {(agent) => {
+                  const agentCount = () =>
+                    props.tasks.filter((t) => t.agentId === agent().id && t.state !== "closed").length +
+                    (props.activeTurns?.[agent().id] ? 1 : 0);
+                  return (
+                    <Button
+                      type="button"
+                      variant={filterAgentId() === agent().id ? "secondary" : "ghost"}
+                      size="xs"
+                      class="tasks-hub-agent-filter-btn"
+                      onClick={() =>
+                        setFilterAgentId(filterAgentId() === agent().id ? "" : agent().id)
+                      }
+                    >
+                      <AgentAvatar agent={agent()} class="tasks-page-avatar" />
+                      <span>{agent().name}</span>
+                      <Show when={agentCount() > 0}>
+                        <span class="tasks-hub-agent-count">{agentCount()}</span>
+                      </Show>
+                    </Button>
+                  );
+                }}
+              </For>
+            </div>
+          </div>
+
+          <Show when={viewMode() === "kanban"}>
+            <TasksKanbanBoard
+              pageProps={props}
+              filteredTasks={filteredTasks()}
+              attentionEntries={attentionEntries()}
+              filterAgentId={filterAgentId()}
+            />
+          </Show>
+          <Show when={viewMode() === "gantt"}>
+            <TasksGanttTimeline
+              pageProps={props}
+              filteredTasks={filteredTasks()}
+              attentionEntries={attentionEntries()}
+              filterAgentId={filterAgentId()}
+            />
+          </Show>
+          <Show when={viewMode() === "list"}>
+            <TasksList
+              pageProps={props}
+              filteredTasks={filteredTasks()}
+              attentionEntries={attentionEntries()}
+            />
+          </Show>
+
+          <Show when={empty() && viewMode() === "list"}>
             <TasksEmptyBoard agents={props.agents} />
           </Show>
         </div>

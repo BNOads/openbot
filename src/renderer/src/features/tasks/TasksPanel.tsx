@@ -32,7 +32,16 @@ interface TasksPanelProps {
 /** The Tasks page on desktop: the agents of the active server, the task IPC, and voice from this computer. */
 export function TasksPanel(props: TasksPanelProps) {
   const { agentList } = useAgents();
-  const { approvals, pendingPrompts, respondToApprovalRequest } = useTurns();
+  const {
+    approvals,
+    pendingPrompts,
+    respondToApprovalRequest,
+    activeTurns,
+    turnProgress,
+    queues,
+    setPendingPrompts,
+    setSubmittedPromptRequests,
+  } = useTurns();
   const threads = useAgentTasks();
   const tabs = useAgentThreads();
   const { selectAgent } = useNavigation();
@@ -69,6 +78,42 @@ export function TasksPanel(props: TasksPanelProps) {
         discard: (id, serverId) => window.openbot.agent.discardDraftAttachment(id, serverId),
       }}
       approvals={approvals()}
+      pendingPrompts={pendingPrompts()}
+      activeTurns={activeTurns()}
+      turnProgress={turnProgress()}
+      queues={queues()}
+      onSelectAgentChat={(agentId) => {
+        layout.setSidebarView("agents");
+        selectAgent(agentId);
+      }}
+      onAnswerPrompt={async (agentId, threadId, requestId, answers) => {
+        const key = attentionKey(agentId, threadId);
+        try {
+          await window.openbot.agent.respondToPrompt({ requestId, answers }, props.serverId);
+          setPendingPrompts((current) => ({ ...current, [key]: undefined }));
+          setSubmittedPromptRequests((current) => ({
+            ...current,
+            [threadId ? key : agentId]: String(requestId),
+          }));
+          return true;
+        } catch (error) {
+          const { t, errorMessage } = currentText();
+          actionToast.error(errorMessage(error, t("app.errorStatus.answer")));
+          return false;
+        }
+      }}
+      onRespondBrowserTakeover={async (agentId, threadId, requestId, decision) => {
+        const key = attentionKey(agentId, threadId);
+        try {
+          await window.openbot.agent.respondToBrowserTakeover({ requestId, decision }, props.serverId);
+          setPendingPrompts((current) => ({ ...current, [key]: undefined }));
+          return true;
+        } catch (error) {
+          const { t, errorMessage } = currentText();
+          actionToast.error(errorMessage(error, t("app.errorStatus.browserTakeover")));
+          return false;
+        }
+      }}
       // A question and a browser takeover wait by thread, as the thread tab reads them.
       waitsForAnswer={(task) => pendingPrompts()[attentionKey(task.agentId, task.threadId)] !== undefined}
       // The tab is written first, so the chat opens on it. Opening the chat closes the page.

@@ -8,6 +8,9 @@ import { type DynamicRecord, isDynamicRecord } from "@openbot/contracts/runtime-
 const REF = /^(\d+):[^:\s]+:\d+$/u;
 /** A snapshot line, `<ref> <role> "<name>"`, copied as a target: the ref decides. */
 const REF_LINE = /^(\d+:[^:\s]+:\d+)\s/u;
+/** An agent-browser short ref (`@e1`, `e1`) from the latest snapshot. */
+const SHORT_REF = /^@?e([1-9]\d*)$/iu;
+const SHORT_REF_LINE = /^@?e([1-9]\d*)\s/iu;
 /** `link "Travel"`: the role and the name of a snapshot line, without the ref. */
 const ROLE_LINE = /^([a-z]+) "(.+)"$/u;
 /** `css #main`, `css: #main`. */
@@ -75,6 +78,8 @@ function repairTarget(value: unknown): DynamicRecord | undefined {
 function targetForm(value: unknown): DynamicRecord | undefined {
   if (typeof value === "string") {
     const text = value.trim();
+    const shortMatch = SHORT_REF.exec(text) ?? SHORT_REF_LINE.exec(text);
+    if (shortMatch) return { kind: "ref", ref: `@e${shortMatch[1]}`, revision: 0 };
     if (REF.test(text)) return refTarget(text);
     const line = REF_LINE.exec(text)?.[1];
     if (line !== undefined) return refTarget(line);
@@ -97,9 +102,15 @@ function targetForm(value: unknown): DynamicRecord | undefined {
     else if (typeof target.x === "number" && typeof target.y === "number") target = { ...target, kind: "point" };
   }
   if (target.kind === "ref" && typeof target.ref === "string") {
-    // A whole snapshot line in ref: its first part is the ref.
-    const ref = REF_LINE.exec(target.ref.trim())?.[1] ?? target.ref.trim();
-    if (REF.test(ref)) target = { ...target, ref, revision: target.revision ?? Number(ref.split(":", 1)[0]) };
+    const trimmed = target.ref.trim();
+    const shortMatch = SHORT_REF.exec(trimmed) ?? SHORT_REF_LINE.exec(trimmed);
+    if (shortMatch) {
+      target = { ...target, ref: `@e${shortMatch[1]}`, revision: typeof target.revision === "number" ? target.revision : 0 };
+    } else {
+      // A whole snapshot line in ref: its first part is the ref.
+      const ref = REF_LINE.exec(trimmed)?.[1] ?? trimmed;
+      if (REF.test(ref)) target = { ...target, ref, revision: target.revision ?? Number(ref.split(":", 1)[0]) };
+    }
   }
   // role("button", { name: "Start", exact: true }), as Playwright writes it, in a target object.
   if (target.kind === "role" && isDynamicRecord(target.name)) {
@@ -156,6 +167,16 @@ function repairFields(tool: string, fields: DynamicRecord): DynamicRecord {
       );
       const [only] = revisions;
       if (revisions.size === 1 && only !== undefined) args = { ...args, revision: Number(only) };
+      else if (
+        list.some(
+          (field) =>
+            isDynamicRecord(field) &&
+            typeof field.ref === "string" &&
+            (SHORT_REF.test(field.ref.trim()) || SHORT_REF_LINE.test(field.ref.trim())),
+        )
+      ) {
+        args = { ...args, revision: 0 };
+      }
     }
   }
   return args;

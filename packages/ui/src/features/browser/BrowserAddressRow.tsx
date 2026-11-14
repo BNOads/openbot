@@ -347,6 +347,71 @@ export function BrowserAddressRow(props: {
           />
         </Show>
       </form>
+      <Show when={tab() && props.view.onToggleUserControl}>
+        <Button
+          variant={tab()?.userControl ? "primary" : "secondary"}
+          size="xs"
+          class="browser-handoff-pill"
+          data-user-control={tab()?.userControl ? "" : undefined}
+          title={
+            tab()?.userControl
+              ? "Você está no controle manual desta aba. Clique para devolver ao Bot."
+              : "Clique para assumir o controle manual desta aba do navegador."
+          }
+          onClick={() => {
+            const current = tab();
+            if (current) props.view.onToggleUserControl?.(current);
+          }}
+        >
+          <span>{tab()?.userControl ? "🤖 Devolver ao Bot" : "🖐 Assumir Navegador"}</span>
+        </Button>
+      </Show>
+      <Show when={tab() && props.view.onQuickCommand && !props.narrow}>
+        <div class="browser-quick-actions" role="group" aria-label="Comandos rápidos para o Bot">
+          <Button
+            variant="ghost"
+            size="xs"
+            class="browser-quick-chip"
+            title="Pedir para o bot assumir daqui e continuar a tarefa na página atual"
+            onClick={() =>
+              props.view.onQuickCommand?.(
+                "Assuma o navegador nesta aba atual, faça um snapshot (@e1, @e2...) da página e continue a tarefa a partir daqui.",
+                tab(),
+              )
+            }
+          >
+            ⚡ Assumir daqui
+          </Button>
+          <Button
+            variant="ghost"
+            size="xs"
+            class="browser-quick-chip"
+            title="Avisar o bot que você já concluiu o login, QR Code ou verificação"
+            onClick={() =>
+              props.view.onQuickCommand?.(
+                "Já concluí o login / QR Code / verificação nesta aba do navegador. Faça um novo snapshot e continue de onde parou.",
+                tab(),
+              )
+            }
+          >
+            🔑 Login/QR pronto
+          </Button>
+          <Button
+            variant="ghost"
+            size="xs"
+            class="browser-quick-chip"
+            title="Pedir para o bot extrair as informações principais desta página"
+            onClick={() =>
+              props.view.onQuickCommand?.(
+                "Faça um snapshot desta página aberta no navegador e extraia os dados principais de forma estruturada.",
+                tab(),
+              )
+            }
+          >
+            📋 Extrair dados
+          </Button>
+        </div>
+      </Show>
       <Show when={profile()}>
         {(current) => (
           <span class="browser-profile-status" title={browserTabProfileLabel(t, current())}>

@@ -602,10 +602,15 @@ export function acpMcpServers(
         });
         continue;
       }
+      const sanitizeWrapper = "/data/.local/bin/mcp-stdio-sanitize.js";
+      const shouldWrap =
+        process.platform === "linux" &&
+        server.command !== sanitizeWrapper &&
+        !server.args.includes(sanitizeWrapper);
       entries.push({
         name,
-        command: server.command,
-        args: server.args,
+        command: shouldWrap ? sanitizeWrapper : server.command,
+        args: shouldWrap ? [server.command, ...server.args] : server.args,
         env: Object.entries(mcpLaunchEnvironment(server)).map(([name, value]) => ({ name, value })),
       });
     } else {

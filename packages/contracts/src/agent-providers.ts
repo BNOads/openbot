@@ -928,7 +928,7 @@ export function usageQuotaForModel(
   model: string | null | undefined,
 ): Pick<AccountUsageLimit, "primary" | "secondary"> | undefined {
   return model && limit.groups?.some((group) => group.models.length > 0)
-    ? usageGroupForModel(limit.groups, model)
+    ? (usageGroupForModel(limit.groups, model) ?? limit)
     : limit;
 }
 

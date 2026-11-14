@@ -659,6 +659,24 @@ export function BrowserDock(props: BrowserDockProps) {
               onValueChange={props.onValueChange}
             />
           </div>
+          <Show when={props.onHandoff}>
+            {(handoff) => (
+              <Button
+                type="button"
+                variant="secondary"
+                size="xs"
+                class="browser-dock-quick-handoff"
+                loading={props.handoffPending === true}
+                title="Alternar controle do navegador entre você e o Bot"
+                onClick={() => handoff()()}
+              >
+                {props.island?.kind === "activity" &&
+                (props.island.control === "user" || props.island.control === "request")
+                  ? "🤖 Passar p/ Bot"
+                  : "🖐 Assumir"}
+              </Button>
+            )}
+          </Show>
           <Button
             type="button"
             variant="ghost"

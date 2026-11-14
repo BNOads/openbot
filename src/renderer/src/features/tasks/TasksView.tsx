@@ -6,6 +6,7 @@ import {
 import { INPUT_LIMITS } from "@openbot/contracts/input-limits";
 import type {
   AgentApproval,
+  AgentEvent,
   AgentTask,
   AgentTaskInput,
   AgentTasksSnapshot,
@@ -13,6 +14,7 @@ import type {
   AttachmentSummary,
   ConversationSnapshot,
   DraftAttachment,
+  QueueSnapshot,
 } from "@openbot/contracts/ipc";
 import type { AppTextKey } from "@openbot/i18n";
 import { plainTaskTitle, taskApproval } from "@openbot/team-client/agent-tasks";
@@ -116,6 +118,32 @@ interface TasksViewProps {
   /** The waiting approvals of the server's agents. */
   approvals: readonly AgentApproval[];
   onRespondApproval: (approval: AgentApproval, decision: "accept" | "decline") => Promise<boolean>;
+  /** Pending questions and browser takeover requests across agents/threads. */
+  pendingPrompts?: Readonly<
+    Record<
+      string,
+      | Extract<AgentEvent, { type: "prompt" | "browser-takeover-requested" }>
+      | undefined
+    >
+  > | undefined;
+  activeTurns?: Readonly<Record<string, string | null>> | undefined;
+  turnProgress?: Readonly<
+    Record<string, { turnId: string; detail: string; running?: boolean; activity?: string } | undefined>
+  > | undefined;
+  queues?: Readonly<Record<string, QueueSnapshot>> | undefined;
+  onSelectAgentChat?: ((agentId: string) => void) | undefined;
+  onAnswerPrompt?: (
+    agentId: string,
+    threadId: string | undefined,
+    requestId: string | number,
+    answers: Record<string, string[]>,
+  ) => Promise<boolean>;
+  onRespondBrowserTakeover?: (
+    agentId: string,
+    threadId: string | undefined,
+    requestId: string,
+    decision: "complete" | "cancel",
+  ) => Promise<boolean>;
   /** Moves the read mark of an open task to a message. Absent where the server keeps no read marks. */
   onRead?: ((input: AgentTaskInput, messageId: string) => void) | undefined;
   /** Whether the task's running turn waits for a question or a browser takeover, which the chat answers. */
@@ -976,6 +1004,29 @@ export function TasksView(props: TasksViewProps) {
       }
       selectedId={state.selectedId}
       waitOf={waitOf}
+      approvals={props.approvals}
+      onRespondApproval={props.onRespondApproval}
+      pendingPrompts={props.pendingPrompts}
+      activeTurns={props.activeTurns}
+      turnProgress={props.turnProgress}
+      queues={props.queues}
+      onSelectAgentChat={props.onSelectAgentChat}
+      onAnswerPrompt={props.onAnswerPrompt}
+      onRespondBrowserTakeover={props.onRespondBrowserTakeover}
+      onQuickReplyTask={(task, text) => void sendToTask(task.id, text)}
+      onArchiveTask={(task) =>
+        void runAction(
+          () => props.source.close({ agentId: task.agentId, taskId: task.id }, props.serverId),
+          "conversation.threads.error.archive",
+        )
+      }
+      onReopenTask={(task) =>
+        void runAction(
+          () => props.source.reopen({ agentId: task.agentId, taskId: task.id }, props.serverId),
+          "conversation.threads.error.restore",
+        )
+      }
+      onOpenInChat={props.onOpenInChat}
       sendShortcut={props.sendShortcut}
       macWindowControls={appInfo()?.platform === "darwin"}
       onSelect={select}

@@ -927,6 +927,13 @@ export class BrowserCdpEngine {
         boundSerializedSnapshot(snapshot);
         const retainedRefs = new Set(snapshot.elements.map((element) => element.ref));
         this.#targets = new Map([...parsed.targets].filter(([ref]) => retainedRefs.has(ref)));
+        snapshot.elements.forEach((element, index) => {
+          const record = parsed.targets.get(element.ref);
+          if (record) {
+            this.#targets.set(`@e${index + 1}`, record);
+            this.#targets.set(`e${index + 1}`, record);
+          }
+        });
         this.#lastSnapshot = snapshot;
         // An empty snapshot of a web page also needs the image: the page draws nothing that the snapshot can read.
         // A document with no root element, such as a load stopped before the first tag, draws no frame,
@@ -1159,7 +1166,7 @@ export class BrowserCdpEngine {
     progress: BrowserFillFieldsProgress,
     checkPolicy: () => void,
   ): Effect.fn.Return<void, BrowserOperationError> {
-    if (!this.#lastSnapshot || this.#lastSnapshot.revision !== revision)
+    if (!this.#lastSnapshot || (revision !== 0 && this.#lastSnapshot.revision !== revision))
       return yield* fillFieldsFailure("stale_snapshot");
     const generation = this.#navigationGeneration;
     const origin = yield* browserSync(() => new URL(this.#contents.getURL()).origin);
@@ -1204,9 +1211,13 @@ export class BrowserCdpEngine {
             for (const [index, field] of fields.entries()) {
               progress.failedIndex = index;
               yield* checkDocument();
-              const record = this.#targets.get(field.ref);
+              const trimmedFieldRef = field.ref.trim();
+              const normalizedFieldRef = /^@?e[1-9]\d*$/iu.test(trimmedFieldRef)
+                ? `@e${trimmedFieldRef.replace(/^@?e/iu, "")}`
+                : trimmedFieldRef;
+              const record = this.#targets.get(normalizedFieldRef) ?? this.#targets.get(field.ref);
               if (!record || record.targetId) return yield* fillFieldsFailure("invalid_target");
-              const target: BrowserTarget = { kind: "ref", ref: field.ref, revision };
+              const target: BrowserTarget = { kind: "ref", ref: normalizedFieldRef, revision };
               // A hidden or changed ref fails here before any input. Report a fixed reason code.
               const resolved = yield* this.#resolveElementEffect(send, target, deadline).pipe(
                 Effect.catch(() =>
@@ -3046,10 +3057,17 @@ export class BrowserCdpEngine {
       return { x: target.x, y: target.y };
     }
     if (target.kind === "ref") {
-      if (!this.#lastSnapshot || target.revision !== this.#lastSnapshot.revision) {
+      const isShortRef = /^@?e[1-9]\d*$/iu.test(target.ref.trim());
+      if (
+        !this.#lastSnapshot ||
+        (!isShortRef && target.revision !== 0 && target.revision !== this.#lastSnapshot.revision)
+      ) {
         return yield* browserFailure(new Error("Stale browser reference. Take a fresh snapshot before acting."));
       }
-      const record = this.#targets.get(target.ref);
+      const normalizedRef = isShortRef
+        ? `@e${target.ref.trim().replace(/^@?e/iu, "")}`
+        : target.ref;
+      const record = this.#targets.get(normalizedRef) ?? this.#targets.get(target.ref);
       if (!record)
         return yield* browserFailure(new Error("Element reference is no longer available. Take a fresh snapshot."));
       const sessionId = record.targetId ? this.#targetSessions.get(record.targetId)?.sessionId : undefined;

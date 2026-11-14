@@ -186,8 +186,8 @@ function antigravityRateLimits(
   const listed = groups.some((group) => group.models.length > 0);
   const group =
     model && listed
-      ? usageGroupForModel(groups, model)
-      : (geminiGroup(groups) ?? (model ? undefined : leastRoom(groups)));
+      ? (usageGroupForModel(groups, model) ?? geminiGroup(groups) ?? leastRoom(groups))
+      : (geminiGroup(groups) ?? leastRoom(groups));
   if (!group) return NO_USAGE;
   return {
     rateLimits: { limitId: "antigravity", primary: group.primary, secondary: group.secondary },

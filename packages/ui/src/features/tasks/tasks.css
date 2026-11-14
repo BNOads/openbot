@@ -628,3 +628,734 @@ html.panel-resizing .tasks-page-side {
     transition: none;
   }
 }
+
+/* ============================================================================
+ * Tasks Hub Upgrade: Kanban, Gantt & Central de Aprovações
+ * ============================================================================ */
+
+.tasks-page[data-view-mode="kanban"] .tasks-page-column,
+.tasks-page[data-view-mode="gantt"] .tasks-page-column {
+  max-width: 100%;
+}
+
+.tasks-page[data-view-mode="list"] .tasks-page-column {
+  max-width: 58rem;
+}
+
+.tasks-hub-toolbar {
+  display: flex;
+  flex-direction: column;
+  gap: var(--openbot-space-2);
+  margin-bottom: var(--openbot-space-3);
+  padding: var(--openbot-space-2-5) var(--openbot-space-3);
+  border: 1px solid var(--openbot-border);
+  border-radius: var(--openbot-radius-lg);
+  background: var(--openbot-bg-surface);
+}
+
+.tasks-hub-toolbar-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--openbot-space-2);
+}
+
+.tasks-hub-modes {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--openbot-space-1);
+  padding: 2px;
+  border: 1px solid var(--openbot-border);
+  border-radius: var(--openbot-radius-md);
+  background: var(--openbot-bg-canvas);
+}
+
+.tasks-hub-kpis {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--openbot-space-2);
+  font-size: var(--openbot-text-xs);
+  color: var(--openbot-text-secondary);
+}
+
+.tasks-hub-kpi {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--openbot-space-1);
+  padding: 3px var(--openbot-space-2);
+  border-radius: var(--openbot-radius-pill);
+  border: 1px solid var(--openbot-border);
+  background: var(--openbot-bg-canvas);
+  white-space: nowrap;
+}
+
+.tasks-hub-kpi[data-tone="attention"] {
+  border-color: color-mix(in srgb, var(--openbot-accent) 55%, transparent);
+  background: color-mix(in srgb, var(--openbot-accent) 14%, transparent);
+  color: var(--openbot-text-primary);
+}
+
+.tasks-hub-search {
+  display: flex;
+  align-items: center;
+  gap: var(--openbot-space-1-5);
+  min-width: 210px;
+  flex: 1 1 210px;
+  max-width: 300px;
+  height: var(--openbot-control-sm);
+  padding: 0 var(--openbot-space-2-5);
+  border: 1px solid var(--openbot-border);
+  border-radius: var(--openbot-radius-md);
+  background: var(--openbot-bg-canvas);
+}
+
+.tasks-hub-search > svg {
+  width: var(--openbot-icon-sm);
+  height: var(--openbot-icon-sm);
+  flex: none;
+  color: var(--openbot-text-muted);
+}
+
+.tasks-hub-search > input {
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--openbot-text-primary);
+  font-size: var(--openbot-text-sm);
+}
+
+.tasks-hub-agents-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--openbot-space-1);
+  padding-top: var(--openbot-space-1);
+  border-top: 1px solid var(--openbot-border);
+}
+
+.tasks-hub-agent-filter-btn.ui-button {
+  gap: var(--openbot-space-1-5);
+  border-radius: var(--openbot-radius-pill);
+}
+
+.tasks-hub-agent-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: var(--openbot-radius-pill);
+  background: var(--openbot-bg-control-active);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Kanban Board ------------------------------------------------------------ */
+
+.tasks-kanban-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(260px, 1fr));
+  gap: var(--openbot-space-3);
+  align-items: start;
+  overflow-x: auto;
+  padding-bottom: var(--openbot-space-4);
+}
+
+@media (max-width: 1180px) {
+  .tasks-kanban-grid {
+    grid-template-columns: repeat(2, minmax(260px, 1fr));
+  }
+}
+
+@media (max-width: 680px) {
+  .tasks-kanban-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.tasks-kanban-col {
+  display: flex;
+  flex-direction: column;
+  gap: var(--openbot-space-2);
+  min-width: 0;
+  padding: var(--openbot-space-2-5);
+  border: 1px solid var(--openbot-border);
+  border-radius: var(--openbot-radius-lg);
+  background: var(--openbot-bg-surface);
+}
+
+.tasks-kanban-col[data-col="attention"] {
+  border-color: color-mix(in srgb, var(--openbot-accent) 45%, var(--openbot-border));
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--openbot-accent) 7%, var(--openbot-bg-surface)),
+    var(--openbot-bg-surface) 140px
+  );
+}
+
+.tasks-kanban-col-header {
+  display: flex;
+  align-items: center;
+  gap: var(--openbot-space-2);
+  padding: var(--openbot-space-1) var(--openbot-space-1-5);
+}
+
+.tasks-kanban-col-header > h3 {
+  margin: 0;
+  flex: 1;
+  font-size: var(--openbot-text-sm);
+  font-weight: var(--openbot-weight-semibold);
+  color: var(--openbot-text-primary);
+}
+
+.tasks-kanban-col-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: var(--openbot-radius-pill);
+  flex: none;
+}
+
+.tasks-kanban-col-dot[data-tone="attention"],
+.tasks-gantt-dot[data-tone="attention"] {
+  background: #f59e0b;
+  box-shadow: 0 0 8px rgba(245, 158, 11, 0.55);
+}
+
+.tasks-kanban-col-dot[data-tone="working"],
+.tasks-gantt-dot[data-tone="working"] {
+  background: #3b82f6;
+  box-shadow: 0 0 8px rgba(59, 130, 246, 0.55);
+}
+
+.tasks-kanban-col-dot[data-tone="queued"],
+.tasks-gantt-dot[data-tone="queued"] {
+  background: #a855f7;
+}
+
+.tasks-kanban-col-dot[data-tone="delivered"],
+.tasks-gantt-dot[data-tone="delivered"] {
+  background: #10b981;
+}
+
+.tasks-kanban-col-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--openbot-space-2);
+}
+
+.tasks-kanban-empty {
+  padding: var(--openbot-space-4) var(--openbot-space-2);
+  border: 1px dashed var(--openbot-border);
+  border-radius: var(--openbot-radius-md);
+  color: var(--openbot-text-muted);
+  font-size: var(--openbot-text-xs);
+  text-align: center;
+}
+
+/* Task & Attention Cards -------------------------------------------------- */
+
+.tasks-hub-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--openbot-space-2);
+  padding: var(--openbot-space-2-5);
+  border: 1px solid var(--openbot-border);
+  border-radius: var(--openbot-radius-md);
+  background: var(--openbot-bg-canvas);
+  transition: border-color 140ms ease, box-shadow 140ms ease;
+}
+
+.tasks-hub-card:hover {
+  border-color: var(--openbot-border-strong);
+}
+
+.tasks-hub-card[data-selected] {
+  border-color: var(--openbot-accent);
+  box-shadow: 0 0 0 1px var(--openbot-accent);
+}
+
+.tasks-hub-card[data-closed] {
+  opacity: 0.72;
+}
+
+.tasks-hub-card-attention {
+  border-color: color-mix(in srgb, #f59e0b 55%, var(--openbot-border));
+}
+
+.tasks-hub-card-running {
+  border-color: color-mix(in srgb, #3b82f6 50%, var(--openbot-border));
+}
+
+.tasks-hub-card-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--openbot-space-2);
+}
+
+.tasks-hub-agent-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--openbot-space-1-5);
+  min-width: 0;
+  font-size: var(--openbot-text-xs);
+  color: var(--openbot-text-secondary);
+}
+
+.tasks-hub-agent-pill > strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: var(--openbot-weight-medium);
+  color: var(--openbot-text-primary);
+}
+
+.tasks-hub-time {
+  flex: none;
+  font-size: 11px;
+  color: var(--openbot-text-muted);
+}
+
+.tasks-hub-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 7px;
+  border-radius: var(--openbot-radius-pill);
+  font-size: 11px;
+  font-weight: var(--openbot-weight-medium);
+  white-space: nowrap;
+}
+
+.tasks-hub-badge[data-tone="attention"] {
+  background: rgba(245, 158, 11, 0.16);
+  color: #fbbf24;
+}
+
+.tasks-hub-badge[data-tone="working"] {
+  background: rgba(59, 130, 246, 0.16);
+  color: #60a5fa;
+}
+
+.tasks-hub-badge[data-tone="queued"] {
+  background: rgba(168, 85, 247, 0.16);
+  color: #c084fc;
+}
+
+.tasks-hub-card-title-btn {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--openbot-space-2);
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--openbot-text-primary);
+  font-size: var(--openbot-text-sm);
+  font-weight: var(--openbot-weight-medium);
+  line-height: 1.35;
+  text-align: start;
+  cursor: pointer;
+}
+
+.tasks-hub-card-title-btn:hover {
+  text-decoration: underline;
+}
+
+.tasks-hub-card-preview {
+  margin: 0;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  color: var(--openbot-text-secondary);
+  font-size: var(--openbot-text-xs);
+  line-height: 1.4;
+}
+
+.tasks-hub-live-step {
+  display: flex;
+  align-items: center;
+  gap: var(--openbot-space-1-5);
+  padding: var(--openbot-space-1) var(--openbot-space-2);
+  border-radius: var(--openbot-radius-sm);
+  background: rgba(59, 130, 246, 0.1);
+  color: var(--openbot-text-secondary);
+  font-size: var(--openbot-text-xs);
+}
+
+.tasks-hub-live-step > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tasks-hub-spin {
+  width: 13px;
+  height: 13px;
+  flex: none;
+  color: #60a5fa;
+  animation: ui-spin 1s linear infinite;
+}
+
+.tasks-hub-card-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--openbot-space-1-5);
+  padding-top: var(--openbot-space-1);
+  border-top: 1px solid var(--openbot-border);
+}
+
+.tasks-hub-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--openbot-space-1);
+}
+
+.tasks-hub-inline-prompt {
+  max-height: 320px;
+  overflow-y: auto;
+  padding: var(--openbot-space-1-5);
+  border-radius: var(--openbot-radius-sm);
+  background: var(--openbot-bg-surface);
+}
+
+.tasks-hub-takeover-box {
+  display: flex;
+  flex-direction: column;
+  gap: var(--openbot-space-1-5);
+}
+
+.tasks-hub-url-chip {
+  display: inline-block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 2px 6px;
+  border-radius: var(--openbot-radius-sm);
+  background: var(--openbot-bg-surface);
+  color: var(--openbot-text-muted);
+  font-size: 11px;
+}
+
+.tasks-hub-quick-reply {
+  display: flex;
+  align-items: center;
+  gap: var(--openbot-space-1);
+  padding-top: var(--openbot-space-1);
+}
+
+.tasks-hub-quick-reply-input {
+  flex: 1;
+  min-width: 0;
+  height: 28px;
+  padding: 0 var(--openbot-space-2);
+  border: 1px solid var(--openbot-border);
+  border-radius: var(--openbot-radius-sm);
+  background: var(--openbot-bg-surface);
+  color: var(--openbot-text-primary);
+  font-size: var(--openbot-text-xs);
+}
+
+/* Urgent Banner in List Mode ---------------------------------------------- */
+
+.tasks-list-enhanced {
+  display: flex;
+  flex-direction: column;
+  gap: var(--openbot-space-3);
+}
+
+.tasks-hub-urgent-banner {
+  display: flex;
+  flex-direction: column;
+  gap: var(--openbot-space-2-5);
+  padding: var(--openbot-space-3);
+  border: 1px solid color-mix(in srgb, #f59e0b 55%, var(--openbot-border));
+  border-radius: var(--openbot-radius-lg);
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, #f59e0b 10%, var(--openbot-bg-surface)),
+    var(--openbot-bg-surface)
+  );
+}
+
+.tasks-hub-urgent-header {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.tasks-hub-urgent-header > strong {
+  font-size: var(--openbot-text-sm);
+  color: var(--openbot-text-primary);
+}
+
+.tasks-hub-urgent-header > span {
+  font-size: var(--openbot-text-xs);
+  color: var(--openbot-text-secondary);
+}
+
+.tasks-hub-urgent-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: var(--openbot-space-2);
+}
+
+.tasks-page-row-enhanced {
+  display: flex;
+  align-items: center;
+  gap: var(--openbot-space-1-5);
+}
+
+.tasks-page-row-enhanced > .tasks-page-row {
+  flex: 1;
+  min-width: 0;
+}
+
+.tasks-row-quick-approve {
+  flex: none;
+}
+
+/* Gantt Timeline ---------------------------------------------------------- */
+
+.tasks-gantt-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: var(--openbot-space-2-5);
+  padding: var(--openbot-space-3);
+  border: 1px solid var(--openbot-border);
+  border-radius: var(--openbot-radius-lg);
+  background: var(--openbot-bg-surface);
+}
+
+.tasks-gantt-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--openbot-space-2);
+}
+
+.tasks-gantt-toolbar-title {
+  font-size: var(--openbot-text-sm);
+  font-weight: var(--openbot-weight-semibold);
+  color: var(--openbot-text-primary);
+}
+
+.tasks-gantt-range-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px;
+  border: 1px solid var(--openbot-border);
+  border-radius: var(--openbot-radius-md);
+  background: var(--openbot-bg-canvas);
+}
+
+.tasks-gantt-legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--openbot-space-3);
+  font-size: var(--openbot-text-xs);
+  color: var(--openbot-text-secondary);
+}
+
+.tasks-gantt-legend > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.tasks-gantt-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: var(--openbot-radius-pill);
+}
+
+.tasks-gantt-board {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--openbot-border);
+  border-radius: var(--openbot-radius-md);
+  background: var(--openbot-bg-canvas);
+  overflow: hidden;
+}
+
+.tasks-gantt-axis {
+  display: grid;
+  grid-template-columns: 240px minmax(0, 1fr);
+  border-bottom: 1px solid var(--openbot-border);
+  background: var(--openbot-bg-surface);
+  font-size: 11px;
+  color: var(--openbot-text-muted);
+}
+
+.tasks-gantt-agent-col-header {
+  padding: var(--openbot-space-2) var(--openbot-space-2-5);
+  border-right: 1px solid var(--openbot-border);
+  font-weight: var(--openbot-weight-medium);
+}
+
+.tasks-gantt-track-header {
+  position: relative;
+  height: 32px;
+}
+
+.tasks-gantt-tick {
+  position: absolute;
+  top: 8px;
+  transform: translateX(-50%);
+  white-space: nowrap;
+}
+
+.tasks-gantt-now-badge {
+  position: absolute;
+  right: 4px;
+  top: 6px;
+  padding: 1px 5px;
+  border-radius: var(--openbot-radius-sm);
+  background: rgba(239, 68, 68, 0.18);
+  color: #f87171;
+  font-size: 10px;
+  font-weight: var(--openbot-weight-semibold);
+}
+
+.tasks-gantt-group {
+  display: flex;
+  flex-direction: column;
+  border-bottom: 1px solid var(--openbot-border);
+}
+
+.tasks-gantt-group:last-child {
+  border-bottom: 0;
+}
+
+.tasks-gantt-group-header {
+  padding: var(--openbot-space-1-5) var(--openbot-space-2-5);
+  background: color-mix(in srgb, var(--openbot-bg-surface) 65%, var(--openbot-bg-canvas));
+  border-bottom: 1px solid var(--openbot-border);
+}
+
+.tasks-gantt-agent-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--openbot-space-2);
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--openbot-text-primary);
+  font-size: var(--openbot-text-xs);
+  cursor: pointer;
+}
+
+.tasks-gantt-row {
+  display: grid;
+  grid-template-columns: 240px minmax(0, 1fr);
+  align-items: center;
+  min-height: 36px;
+  border-bottom: 1px solid color-mix(in srgb, var(--openbot-border) 50%, transparent);
+}
+
+.tasks-gantt-row:last-child {
+  border-bottom: 0;
+}
+
+.tasks-gantt-row[data-selected] {
+  background: var(--openbot-bg-control-active);
+}
+
+.tasks-gantt-row-label {
+  display: flex;
+  align-items: center;
+  gap: var(--openbot-space-1-5);
+  min-width: 0;
+  height: 100%;
+  padding: 0 var(--openbot-space-2-5);
+  border: 0;
+  border-right: 1px solid var(--openbot-border);
+  background: transparent;
+  color: var(--openbot-text-secondary);
+  font-size: var(--openbot-text-xs);
+  text-align: start;
+  cursor: pointer;
+}
+
+.tasks-gantt-row-label:hover {
+  color: var(--openbot-text-primary);
+}
+
+.tasks-gantt-row-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tasks-gantt-track {
+  position: relative;
+  height: 28px;
+  margin-inline: var(--openbot-space-2);
+  background-image: repeating-linear-gradient(
+    to right,
+    color-mix(in srgb, var(--openbot-border) 45%, transparent) 0,
+    color-mix(in srgb, var(--openbot-border) 45%, transparent) 1px,
+    transparent 1px,
+    transparent 16.666%
+  );
+}
+
+.tasks-gantt-bar {
+  position: absolute;
+  top: 3px;
+  bottom: 3px;
+  display: flex;
+  align-items: center;
+  min-width: 28px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: var(--openbot-radius-sm);
+  color: #fff;
+  font-size: 11px;
+  font-weight: var(--openbot-weight-medium);
+  overflow: hidden;
+  cursor: pointer;
+  transition: filter 120ms ease, transform 120ms ease;
+}
+
+.tasks-gantt-bar:hover {
+  filter: brightness(1.12);
+}
+
+.tasks-gantt-bar[data-tone="attention"] {
+  background: linear-gradient(90deg, #d97706, #f59e0b);
+}
+
+.tasks-gantt-bar[data-tone="working"] {
+  background: linear-gradient(90deg, #2563eb, #3b82f6);
+}
+
+.tasks-gantt-bar[data-tone="queued"] {
+  background: linear-gradient(90deg, #7c3aed, #a855f7);
+}
+
+.tasks-gantt-bar[data-tone="delivered"] {
+  background: linear-gradient(90deg, #059669, #10b981);
+}
+
+.tasks-gantt-bar-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

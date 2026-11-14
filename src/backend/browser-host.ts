@@ -4950,8 +4950,8 @@ const ROLE_TAGS: Readonly<Record<string, readonly string[]>> = {
  * `ref [role] "name" [<tag>] [value="…"] [description="…"] [state:value…] [bounds=x,y,w,h]
  * [frame=id frameUrl="…"]`. Text values are JSON strings; the other tokens have no spaces.
  */
-function elementLine(element: BrowserElement): string {
-  const tokens = [element.ref];
+function elementLine(element: BrowserElement, index?: number): string {
+  const tokens = index !== undefined ? [element.ref, `@e${index + 1}`] : [element.ref];
   if (element.role) tokens.push(element.role);
   tokens.push(JSON.stringify(element.name));
   if (!element.role || !ROLE_TAGS[element.role]?.includes(element.tag)) tokens.push(`<${element.tag}>`);

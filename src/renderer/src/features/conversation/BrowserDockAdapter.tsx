@@ -160,10 +160,17 @@ export function BrowserDockAdapter(adapterProps: { tab: BrowserTab | undefined; 
   /** The user takes the page from the agent, or gives it back. A request of the agent ends when the user is done. */
   const handoffAction = (): (() => Promise<void>) | undefined => {
     const tab = adapterProps.tab;
+    if (!tab) return undefined;
     const content = island();
-    if (!tab || content?.kind !== "activity") return undefined;
-    if (content.control === "request") return async () => void (await respondToBrowserTakeover("complete"));
-    if (content.control === "user") return () => releaseBrowserControl(tab.id);
+    if (content?.kind === "activity" && content.control === "request") {
+      return async () => void (await respondToBrowserTakeover("complete"));
+    }
+    if (takeover()) {
+      return async () => void (await respondToBrowserTakeover("complete"));
+    }
+    if (tab.userControl || (content?.kind === "activity" && content.control === "user")) {
+      return () => releaseBrowserControl(tab.id);
+    }
     if (!serverSupportsCapability(props.server, BROWSER_USER_CONTROL_CAPABILITY)) return undefined;
     return () => takeBrowserControl(tab.id);
   };
@@ -205,6 +212,19 @@ export function BrowserDockAdapter(adapterProps: { tab: BrowserTab | undefined; 
         if (target) clearSubmittedDraft(target, { ...draft, attachments: [] });
       });
       return;
+    }
+    const tab = adapterProps.tab;
+    if (tab && (tab.userControl || takeover())) {
+      void (async () => {
+        if (takeover()) await respondToBrowserTakeover("complete");
+        else if (tab.userControl) await releaseBrowserControl(tab.id);
+        updateCurrentDraft({ text });
+        submitComposer();
+      })();
+      return;
+    }
+    if (text.trim() && text !== currentDraft().text) {
+      updateCurrentDraft({ text });
     }
     void submitComposer();
   }
