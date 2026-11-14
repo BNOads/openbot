@@ -630,24 +630,118 @@ html.panel-resizing .tasks-page-side {
 }
 
 /* ============================================================================
- * Tasks Hub Upgrade: Kanban, Gantt & Central de Aprovações
+ * Tasks Hub Upgrade: Kanban, Gantt & Central de Aprovações (Refined UI/UX)
  * ============================================================================ */
 
 .tasks-page[data-view-mode="kanban"] .tasks-page-column,
-.tasks-page[data-view-mode="gantt"] .tasks-page-column {
-  max-width: 100%;
+.tasks-page[data-view-mode="gantt"] .tasks-page-column,
+.tasks-page[data-view-mode="list"] .tasks-page-column {
+  max-width: 1480px;
+  width: 100%;
+  gap: var(--openbot-space-2-5);
 }
 
-.tasks-page[data-view-mode="list"] .tasks-page-column {
-  max-width: 58rem;
+.tasks-top-header-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--openbot-space-3);
+  padding: var(--openbot-space-4) var(--openbot-space-1) var(--openbot-space-1);
 }
+
+.tasks-top-header-row > .tasks-page-header {
+  padding: 0;
+}
+
+/* Clickable Status KPI Pills in Header ------------------------------------ */
+
+.tasks-hub-kpis {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--openbot-space-1-5);
+}
+
+.tasks-hub-kpi {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 10px;
+  border-radius: var(--openbot-radius-pill);
+  border: 1px solid var(--openbot-border);
+  background: var(--openbot-bg-surface);
+  color: var(--openbot-text-secondary);
+  font-size: var(--openbot-text-xs);
+  white-space: nowrap;
+  cursor: pointer;
+  transition: border-color 140ms ease, background 140ms ease, color 140ms ease;
+}
+
+.tasks-hub-kpi:hover {
+  border-color: var(--openbot-border-strong);
+  color: var(--openbot-text-primary);
+}
+
+.tasks-hub-kpi > strong {
+  font-weight: var(--openbot-weight-semibold);
+  color: var(--openbot-text-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.tasks-hub-kpi[data-active] {
+  border-color: var(--openbot-accent);
+  background: color-mix(in srgb, var(--openbot-accent) 14%, var(--openbot-bg-surface));
+  color: var(--openbot-text-primary);
+}
+
+.tasks-hub-kpi[data-tone="attention"] {
+  border-color: rgba(245, 158, 11, 0.45);
+  background: rgba(245, 158, 11, 0.1);
+  color: var(--openbot-text-primary);
+}
+
+.tasks-kpi-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: var(--openbot-radius-pill);
+  flex: none;
+}
+
+.tasks-kpi-dot[data-tone="attention"],
+.tasks-kanban-col-dot[data-tone="attention"],
+.tasks-gantt-dot[data-tone="attention"] {
+  background: #f59e0b;
+  box-shadow: 0 0 6px rgba(245, 158, 11, 0.5);
+}
+
+.tasks-kpi-dot[data-tone="working"],
+.tasks-kanban-col-dot[data-tone="working"],
+.tasks-gantt-dot[data-tone="working"] {
+  background: #3b82f6;
+  box-shadow: 0 0 6px rgba(59, 130, 246, 0.5);
+}
+
+.tasks-kpi-dot[data-tone="queued"],
+.tasks-kanban-col-dot[data-tone="queued"],
+.tasks-gantt-dot[data-tone="queued"] {
+  background: #a855f7;
+}
+
+.tasks-kpi-dot[data-tone="delivered"],
+.tasks-kanban-col-dot[data-tone="delivered"],
+.tasks-gantt-dot[data-tone="delivered"] {
+  background: #10b981;
+}
+
+/* Unified Command & Filter Bar -------------------------------------------- */
 
 .tasks-hub-toolbar {
   display: flex;
   flex-direction: column;
   gap: var(--openbot-space-2);
-  margin-bottom: var(--openbot-space-3);
-  padding: var(--openbot-space-2-5) var(--openbot-space-3);
+  padding: 6px;
   border: 1px solid var(--openbot-border);
   border-radius: var(--openbot-radius-lg);
   background: var(--openbot-bg-surface);
@@ -657,63 +751,76 @@ html.panel-resizing .tasks-page-side {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  justify-content: space-between;
   gap: var(--openbot-space-2);
 }
 
-.tasks-hub-modes {
+/* Segmented Control (Kanban | Gantt | Lista) */
+.tasks-segmented-control {
   display: inline-flex;
   align-items: center;
-  gap: var(--openbot-space-1);
+  gap: 2px;
   padding: 2px;
   border: 1px solid var(--openbot-border);
   border-radius: var(--openbot-radius-md);
   background: var(--openbot-bg-canvas);
+  flex: none;
 }
 
-.tasks-hub-kpis {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--openbot-space-2);
-  font-size: var(--openbot-text-xs);
-  color: var(--openbot-text-secondary);
-}
-
-.tasks-hub-kpi {
+.tasks-segmented-btn {
   display: inline-flex;
   align-items: center;
-  gap: var(--openbot-space-1);
-  padding: 3px var(--openbot-space-2);
-  border-radius: var(--openbot-radius-pill);
-  border: 1px solid var(--openbot-border);
-  background: var(--openbot-bg-canvas);
-  white-space: nowrap;
+  gap: 6px;
+  height: 28px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: calc(var(--openbot-radius-md) - 2px);
+  background: transparent;
+  color: var(--openbot-text-secondary);
+  font-size: var(--openbot-text-xs);
+  font-weight: var(--openbot-weight-medium);
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease;
 }
 
-.tasks-hub-kpi[data-tone="attention"] {
-  border-color: color-mix(in srgb, var(--openbot-accent) 55%, transparent);
-  background: color-mix(in srgb, var(--openbot-accent) 14%, transparent);
+.tasks-segmented-btn:hover {
   color: var(--openbot-text-primary);
 }
 
+.tasks-segmented-btn[data-active] {
+  background: var(--openbot-bg-control-active);
+  color: var(--openbot-text-primary);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.18);
+}
+
+.tasks-segmented-icon {
+  width: 14px;
+  height: 14px;
+  flex: none;
+}
+
+/* Search Bar with Lupa & Clear Button */
 .tasks-hub-search {
   display: flex;
   align-items: center;
-  gap: var(--openbot-space-1-5);
-  min-width: 210px;
-  flex: 1 1 210px;
-  max-width: 300px;
-  height: var(--openbot-control-sm);
-  padding: 0 var(--openbot-space-2-5);
+  gap: var(--openbot-space-2);
+  flex: 1 1 220px;
+  min-width: 180px;
+  height: 32px;
+  padding: 0 10px;
   border: 1px solid var(--openbot-border);
   border-radius: var(--openbot-radius-md);
   background: var(--openbot-bg-canvas);
+  cursor: text;
+  transition: border-color 140ms ease;
 }
 
-.tasks-hub-search > svg {
-  width: var(--openbot-icon-sm);
-  height: var(--openbot-icon-sm);
+.tasks-hub-search:focus-within {
+  border-color: var(--openbot-border-strong);
+}
+
+.tasks-search-lupa {
+  width: 14px;
+  height: 14px;
   flex: none;
   color: var(--openbot-text-muted);
 }
@@ -725,54 +832,271 @@ html.panel-resizing .tasks-page-side {
   outline: 0;
   background: transparent;
   color: var(--openbot-text-primary);
-  font-size: var(--openbot-text-sm);
+  font-size: var(--openbot-text-xs);
 }
 
-.tasks-hub-agents-bar {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--openbot-space-1);
-  padding-top: var(--openbot-space-1);
-  border-top: 1px solid var(--openbot-border);
+.tasks-hub-search > input::-webkit-search-cancel-button {
+  display: none;
 }
 
-.tasks-hub-agent-filter-btn.ui-button {
-  gap: var(--openbot-space-1-5);
-  border-radius: var(--openbot-radius-pill);
-}
-
-.tasks-hub-agent-count {
+.tasks-search-clear {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 16px;
-  height: 16px;
-  padding: 0 4px;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 0;
   border-radius: var(--openbot-radius-pill);
   background: var(--openbot-bg-control-active);
-  font-size: 11px;
+  color: var(--openbot-text-secondary);
+  cursor: pointer;
+}
+
+.tasks-search-clear > svg {
+  width: 11px;
+  height: 11px;
+}
+
+/* Filter Dropdown Triggers & Popovers */
+.tasks-hub-filters-group {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.tasks-filter-trigger.ui-button {
+  height: 32px;
+  gap: 6px;
+  padding-inline: 10px;
+  border: 1px solid var(--openbot-border);
+  border-radius: var(--openbot-radius-md);
+  background: var(--openbot-bg-canvas);
+  font-size: var(--openbot-text-xs);
+}
+
+.tasks-filter-trigger.ui-button:hover {
+  border-color: var(--openbot-border-strong);
+}
+
+.tasks-filter-trigger-label {
+  max-width: 150px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tasks-filter-icon {
+  width: 14px;
+  height: 14px;
+  flex: none;
+  color: var(--openbot-text-muted);
+}
+
+.tasks-filter-pill-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 16px;
+  padding: 0 5px;
+  border-radius: var(--openbot-radius-pill);
+  background: var(--openbot-bg-control-active);
+  color: var(--openbot-text-secondary);
+  font-size: 10px;
   font-variant-numeric: tabular-nums;
 }
 
-/* Kanban Board ------------------------------------------------------------ */
+.tasks-clear-filters-btn.ui-button {
+  height: 32px;
+  gap: 5px;
+  font-size: var(--openbot-text-xs);
+  color: var(--openbot-text-secondary);
+}
+
+/* Filter Popover Menus */
+.tasks-filter-popover.ui-action-menu {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 220px;
+  max-width: 280px;
+  padding: 6px;
+}
+
+.tasks-bot-filter-popover.ui-action-menu {
+  width: 260px;
+}
+
+.tasks-filter-search-box {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 8px;
+  border-radius: var(--ui-menu-item-radius);
+  background: var(--ui-menu-item-hover);
+}
+
+.tasks-filter-search-box > svg {
+  width: 13px;
+  height: 13px;
+  flex: none;
+  color: var(--openbot-text-muted);
+}
+
+.tasks-filter-search-box > input {
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--openbot-text-primary);
+  font-size: var(--openbot-text-xs);
+}
+
+.tasks-filter-search-box > input::-webkit-search-cancel-button {
+  display: none;
+}
+
+.tasks-filter-search-clear {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--openbot-radius-pill);
+  background: transparent;
+  color: var(--openbot-text-muted);
+  cursor: pointer;
+}
+
+.tasks-filter-search-clear > svg {
+  width: 11px;
+  height: 11px;
+}
+
+.tasks-filter-menu-section-title {
+  padding: 4px 8px 2px;
+  font-size: 10px;
+  font-weight: var(--openbot-weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--openbot-text-muted);
+}
+
+.tasks-filter-menu-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  max-height: 280px;
+  overflow-y: auto;
+}
+
+.tasks-filter-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 30px;
+  padding: 4px 8px;
+  border: 0;
+  border-radius: var(--ui-menu-item-radius);
+  background: transparent;
+  color: var(--openbot-text-secondary);
+  font-size: var(--openbot-text-xs);
+  text-align: start;
+  cursor: pointer;
+}
+
+.tasks-filter-menu-item:hover,
+.tasks-filter-menu-item[data-selected] {
+  background: var(--ui-menu-item-hover);
+  color: var(--openbot-text-primary);
+}
+
+.tasks-filter-menu-item-name,
+.tasks-filter-menu-item > .tasks-page-agent-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tasks-filter-menu-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 16px;
+  padding: 0 5px;
+  border-radius: var(--openbot-radius-pill);
+  background: var(--openbot-bg-control-active);
+  color: var(--openbot-text-muted);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+.tasks-filter-menu-badge[data-active] {
+  background: rgba(59, 130, 246, 0.16);
+  color: #60a5fa;
+}
+
+.tasks-filter-divider {
+  height: 1px;
+  margin: 4px 2px;
+  background: var(--openbot-border);
+}
+
+.tasks-custom-date-box {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 6px 8px 4px;
+  border-top: 1px solid var(--openbot-border);
+}
+
+.tasks-custom-date-field {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: var(--openbot-text-xs);
+  color: var(--openbot-text-secondary);
+}
+
+.tasks-custom-date-field > input {
+  height: 26px;
+  padding: 0 6px;
+  border: 1px solid var(--openbot-border);
+  border-radius: var(--openbot-radius-sm);
+  background: var(--openbot-bg-canvas);
+  color: var(--openbot-text-primary);
+  font-size: 11px;
+}
+
+/* Kanban Board (4 Full-Fit Columns with Independent Scroll) --------------- */
 
 .tasks-kanban-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(260px, 1fr));
-  gap: var(--openbot-space-3);
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--openbot-space-2-5);
   align-items: start;
-  overflow-x: auto;
+  width: 100%;
   padding-bottom: var(--openbot-space-4);
 }
 
-@media (max-width: 1180px) {
+@media (max-width: 1020px) {
   .tasks-kanban-grid {
-    grid-template-columns: repeat(2, minmax(260px, 1fr));
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
-@media (max-width: 680px) {
+@media (max-width: 600px) {
   .tasks-kanban-grid {
     grid-template-columns: minmax(0, 1fr);
   }
@@ -781,35 +1105,38 @@ html.panel-resizing .tasks-page-side {
 .tasks-kanban-col {
   display: flex;
   flex-direction: column;
-  gap: var(--openbot-space-2);
   min-width: 0;
-  padding: var(--openbot-space-2-5);
+  max-height: calc(100dvh - 240px);
   border: 1px solid var(--openbot-border);
   border-radius: var(--openbot-radius-lg);
   background: var(--openbot-bg-surface);
+  overflow: hidden;
 }
 
 .tasks-kanban-col[data-col="attention"] {
-  border-color: color-mix(in srgb, var(--openbot-accent) 45%, var(--openbot-border));
-  background: linear-gradient(
-    180deg,
-    color-mix(in srgb, var(--openbot-accent) 7%, var(--openbot-bg-surface)),
-    var(--openbot-bg-surface) 140px
-  );
+  border-color: color-mix(in srgb, #f59e0b 38%, var(--openbot-border));
 }
 
 .tasks-kanban-col-header {
   display: flex;
   align-items: center;
   gap: var(--openbot-space-2);
-  padding: var(--openbot-space-1) var(--openbot-space-1-5);
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--openbot-border);
+  background: color-mix(in srgb, var(--openbot-bg-surface) 85%, var(--openbot-bg-canvas));
+  flex: none;
 }
 
 .tasks-kanban-col-header > h3 {
   margin: 0;
   flex: 1;
-  font-size: var(--openbot-text-sm);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--openbot-text-xs);
   font-weight: var(--openbot-weight-semibold);
+  letter-spacing: 0.01em;
   color: var(--openbot-text-primary);
 }
 
@@ -820,40 +1147,22 @@ html.panel-resizing .tasks-page-side {
   flex: none;
 }
 
-.tasks-kanban-col-dot[data-tone="attention"],
-.tasks-gantt-dot[data-tone="attention"] {
-  background: #f59e0b;
-  box-shadow: 0 0 8px rgba(245, 158, 11, 0.55);
-}
-
-.tasks-kanban-col-dot[data-tone="working"],
-.tasks-gantt-dot[data-tone="working"] {
-  background: #3b82f6;
-  box-shadow: 0 0 8px rgba(59, 130, 246, 0.55);
-}
-
-.tasks-kanban-col-dot[data-tone="queued"],
-.tasks-gantt-dot[data-tone="queued"] {
-  background: #a855f7;
-}
-
-.tasks-kanban-col-dot[data-tone="delivered"],
-.tasks-gantt-dot[data-tone="delivered"] {
-  background: #10b981;
-}
-
 .tasks-kanban-col-body {
   display: flex;
   flex-direction: column;
   gap: var(--openbot-space-2);
+  padding: 10px;
+  overflow-y: auto;
+  flex: 1 1 auto;
 }
 
 .tasks-kanban-empty {
-  padding: var(--openbot-space-4) var(--openbot-space-2);
+  padding: var(--openbot-space-5) var(--openbot-space-2-5);
   border: 1px dashed var(--openbot-border);
   border-radius: var(--openbot-radius-md);
   color: var(--openbot-text-muted);
   font-size: var(--openbot-text-xs);
+  line-height: 1.45;
   text-align: center;
 }
 
@@ -862,12 +1171,12 @@ html.panel-resizing .tasks-page-side {
 .tasks-hub-card {
   display: flex;
   flex-direction: column;
-  gap: var(--openbot-space-2);
-  padding: var(--openbot-space-2-5);
+  gap: 8px;
+  padding: 10px 12px;
   border: 1px solid var(--openbot-border);
   border-radius: var(--openbot-radius-md);
   background: var(--openbot-bg-canvas);
-  transition: border-color 140ms ease, box-shadow 140ms ease;
+  transition: border-color 140ms ease, transform 140ms ease, box-shadow 140ms ease;
 }
 
 .tasks-hub-card:hover {
@@ -880,30 +1189,30 @@ html.panel-resizing .tasks-page-side {
 }
 
 .tasks-hub-card[data-closed] {
-  opacity: 0.72;
+  opacity: 0.68;
 }
 
 .tasks-hub-card-attention {
-  border-color: color-mix(in srgb, #f59e0b 55%, var(--openbot-border));
+  border-left: 3px solid #f59e0b;
 }
 
 .tasks-hub-card-running {
-  border-color: color-mix(in srgb, #3b82f6 50%, var(--openbot-border));
+  border-left: 3px solid #3b82f6;
 }
 
 .tasks-hub-card-top {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: var(--openbot-space-2);
+  gap: 6px;
 }
 
 .tasks-hub-agent-pill {
   display: inline-flex;
   align-items: center;
-  gap: var(--openbot-space-1-5);
+  gap: 6px;
   min-width: 0;
-  font-size: var(--openbot-text-xs);
+  font-size: 11px;
   color: var(--openbot-text-secondary);
 }
 
@@ -917,17 +1226,18 @@ html.panel-resizing .tasks-page-side {
 
 .tasks-hub-time {
   flex: none;
-  font-size: 11px;
+  font-size: 10px;
   color: var(--openbot-text-muted);
+  white-space: nowrap;
 }
 
 .tasks-hub-badge {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  padding: 2px 7px;
+  padding: 1px 6px;
   border-radius: var(--openbot-radius-pill);
-  font-size: 11px;
+  font-size: 10px;
   font-weight: var(--openbot-weight-medium);
   white-space: nowrap;
 }
@@ -950,43 +1260,50 @@ html.panel-resizing .tasks-page-side {
 .tasks-hub-card-title-btn {
   display: flex;
   align-items: flex-start;
-  gap: var(--openbot-space-2);
+  gap: 6px;
   width: 100%;
   padding: 0;
   border: 0;
   background: transparent;
   color: var(--openbot-text-primary);
-  font-size: var(--openbot-text-sm);
+  font-size: var(--openbot-text-xs);
   font-weight: var(--openbot-weight-medium);
-  line-height: 1.35;
+  line-height: 1.4;
   text-align: start;
   cursor: pointer;
 }
 
+.tasks-hub-card-title-btn > span {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
 .tasks-hub-card-title-btn:hover {
-  text-decoration: underline;
+  color: var(--openbot-accent);
 }
 
 .tasks-hub-card-preview {
   margin: 0;
   display: -webkit-box;
-  -webkit-line-clamp: 3;
+  -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
   color: var(--openbot-text-secondary);
-  font-size: var(--openbot-text-xs);
+  font-size: 11px;
   line-height: 1.4;
 }
 
 .tasks-hub-live-step {
   display: flex;
   align-items: center;
-  gap: var(--openbot-space-1-5);
-  padding: var(--openbot-space-1) var(--openbot-space-2);
+  gap: 6px;
+  padding: 4px 8px;
   border-radius: var(--openbot-radius-sm);
   background: rgba(59, 130, 246, 0.1);
   color: var(--openbot-text-secondary);
-  font-size: var(--openbot-text-xs);
+  font-size: 11px;
 }
 
 .tasks-hub-live-step > span {
@@ -997,8 +1314,8 @@ html.panel-resizing .tasks-page-side {
 }
 
 .tasks-hub-spin {
-  width: 13px;
-  height: 13px;
+  width: 12px;
+  height: 12px;
   flex: none;
   color: #60a5fa;
   animation: ui-spin 1s linear infinite;
@@ -1009,22 +1326,28 @@ html.panel-resizing .tasks-page-side {
   flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: var(--openbot-space-1-5);
-  padding-top: var(--openbot-space-1);
-  border-top: 1px solid var(--openbot-border);
+  gap: 6px;
+  padding-top: 6px;
+  border-top: 1px solid color-mix(in srgb, var(--openbot-border) 65%, transparent);
 }
 
 .tasks-hub-card-actions {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: var(--openbot-space-1);
+  gap: 4px;
+}
+
+.tasks-action-icon {
+  width: 12px;
+  height: 12px;
+  flex: none;
 }
 
 .tasks-hub-inline-prompt {
-  max-height: 320px;
+  max-height: 300px;
   overflow-y: auto;
-  padding: var(--openbot-space-1-5);
+  padding: 6px;
   border-radius: var(--openbot-radius-sm);
   background: var(--openbot-bg-surface);
 }
@@ -1032,41 +1355,29 @@ html.panel-resizing .tasks-page-side {
 .tasks-hub-takeover-box {
   display: flex;
   flex-direction: column;
-  gap: var(--openbot-space-1-5);
-}
-
-.tasks-hub-url-chip {
-  display: inline-block;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  padding: 2px 6px;
-  border-radius: var(--openbot-radius-sm);
-  background: var(--openbot-bg-surface);
-  color: var(--openbot-text-muted);
-  font-size: 11px;
+  gap: 6px;
 }
 
 .tasks-hub-quick-reply {
   display: flex;
   align-items: center;
-  gap: var(--openbot-space-1);
-  padding-top: var(--openbot-space-1);
+  gap: 6px;
+  padding-top: 4px;
 }
 
 .tasks-hub-quick-reply-input {
   flex: 1;
   min-width: 0;
-  height: 28px;
-  padding: 0 var(--openbot-space-2);
+  height: 26px;
+  padding: 0 8px;
   border: 1px solid var(--openbot-border);
   border-radius: var(--openbot-radius-sm);
   background: var(--openbot-bg-surface);
   color: var(--openbot-text-primary);
-  font-size: var(--openbot-text-xs);
+  font-size: 11px;
 }
 
-/* Urgent Banner in List Mode ---------------------------------------------- */
+/* Urgent Banner & Enhanced Rows in List Mode ------------------------------ */
 
 .tasks-list-enhanced {
   display: flex;
@@ -1077,36 +1388,37 @@ html.panel-resizing .tasks-page-side {
 .tasks-hub-urgent-banner {
   display: flex;
   flex-direction: column;
-  gap: var(--openbot-space-2-5);
-  padding: var(--openbot-space-3);
-  border: 1px solid color-mix(in srgb, #f59e0b 55%, var(--openbot-border));
+  gap: var(--openbot-space-2);
+  padding: 12px 14px;
+  border: 1px solid rgba(245, 158, 11, 0.45);
   border-radius: var(--openbot-radius-lg);
   background: linear-gradient(
     135deg,
-    color-mix(in srgb, #f59e0b 10%, var(--openbot-bg-surface)),
+    rgba(245, 158, 11, 0.08),
     var(--openbot-bg-surface)
   );
 }
 
 .tasks-hub-urgent-header {
   display: flex;
-  flex-direction: column;
-  gap: 2px;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
 }
 
 .tasks-hub-urgent-header > strong {
-  font-size: var(--openbot-text-sm);
+  font-size: var(--openbot-text-xs);
   color: var(--openbot-text-primary);
 }
 
-.tasks-hub-urgent-header > span {
-  font-size: var(--openbot-text-xs);
+.tasks-hub-urgent-header > span:last-child {
+  font-size: 11px;
   color: var(--openbot-text-secondary);
 }
 
 .tasks-hub-urgent-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
   gap: var(--openbot-space-2);
 }
 
@@ -1121,6 +1433,28 @@ html.panel-resizing .tasks-page-side {
   min-width: 0;
 }
 
+.tasks-row-meta-date {
+  flex: none;
+  font-size: 11px;
+  color: var(--openbot-text-muted);
+}
+
+.tasks-row-agent-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  max-width: 150px;
+}
+
+.tasks-row-agent-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  color: var(--openbot-text-secondary);
+}
+
 .tasks-row-quick-approve {
   flex: none;
 }
@@ -1131,7 +1465,7 @@ html.panel-resizing .tasks-page-side {
   display: flex;
   flex-direction: column;
   gap: var(--openbot-space-2-5);
-  padding: var(--openbot-space-3);
+  padding: 12px;
   border: 1px solid var(--openbot-border);
   border-radius: var(--openbot-radius-lg);
   background: var(--openbot-bg-surface);
@@ -1145,16 +1479,10 @@ html.panel-resizing .tasks-page-side {
   gap: var(--openbot-space-2);
 }
 
-.tasks-gantt-toolbar-title {
-  font-size: var(--openbot-text-sm);
-  font-weight: var(--openbot-weight-semibold);
-  color: var(--openbot-text-primary);
-}
-
 .tasks-gantt-range-group {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 2px;
   padding: 2px;
   border: 1px solid var(--openbot-border);
   border-radius: var(--openbot-radius-md);
@@ -1194,7 +1522,7 @@ html.panel-resizing .tasks-page-side {
 
 .tasks-gantt-axis {
   display: grid;
-  grid-template-columns: 240px minmax(0, 1fr);
+  grid-template-columns: 220px minmax(0, 1fr);
   border-bottom: 1px solid var(--openbot-border);
   background: var(--openbot-bg-surface);
   font-size: 11px;
@@ -1202,19 +1530,19 @@ html.panel-resizing .tasks-page-side {
 }
 
 .tasks-gantt-agent-col-header {
-  padding: var(--openbot-space-2) var(--openbot-space-2-5);
+  padding: 8px 10px;
   border-right: 1px solid var(--openbot-border);
   font-weight: var(--openbot-weight-medium);
 }
 
 .tasks-gantt-track-header {
   position: relative;
-  height: 32px;
+  height: 30px;
 }
 
 .tasks-gantt-tick {
   position: absolute;
-  top: 8px;
+  top: 7px;
   transform: translateX(-50%);
   white-space: nowrap;
 }
@@ -1222,7 +1550,7 @@ html.panel-resizing .tasks-page-side {
 .tasks-gantt-now-badge {
   position: absolute;
   right: 4px;
-  top: 6px;
+  top: 5px;
   padding: 1px 5px;
   border-radius: var(--openbot-radius-sm);
   background: rgba(239, 68, 68, 0.18);
@@ -1242,7 +1570,7 @@ html.panel-resizing .tasks-page-side {
 }
 
 .tasks-gantt-group-header {
-  padding: var(--openbot-space-1-5) var(--openbot-space-2-5);
+  padding: 6px 10px;
   background: color-mix(in srgb, var(--openbot-bg-surface) 65%, var(--openbot-bg-canvas));
   border-bottom: 1px solid var(--openbot-border);
 }
@@ -1250,7 +1578,7 @@ html.panel-resizing .tasks-page-side {
 .tasks-gantt-agent-btn {
   display: inline-flex;
   align-items: center;
-  gap: var(--openbot-space-2);
+  gap: 6px;
   padding: 0;
   border: 0;
   background: transparent;
@@ -1261,9 +1589,9 @@ html.panel-resizing .tasks-page-side {
 
 .tasks-gantt-row {
   display: grid;
-  grid-template-columns: 240px minmax(0, 1fr);
+  grid-template-columns: 220px minmax(0, 1fr);
   align-items: center;
-  min-height: 36px;
+  min-height: 34px;
   border-bottom: 1px solid color-mix(in srgb, var(--openbot-border) 50%, transparent);
 }
 
@@ -1278,10 +1606,10 @@ html.panel-resizing .tasks-page-side {
 .tasks-gantt-row-label {
   display: flex;
   align-items: center;
-  gap: var(--openbot-space-1-5);
+  gap: 6px;
   min-width: 0;
   height: 100%;
-  padding: 0 var(--openbot-space-2-5);
+  padding: 0 10px;
   border: 0;
   border-right: 1px solid var(--openbot-border);
   background: transparent;
@@ -1304,8 +1632,8 @@ html.panel-resizing .tasks-page-side {
 
 .tasks-gantt-track {
   position: relative;
-  height: 28px;
-  margin-inline: var(--openbot-space-2);
+  height: 26px;
+  margin-inline: 8px;
   background-image: repeating-linear-gradient(
     to right,
     color-mix(in srgb, var(--openbot-border) 45%, transparent) 0,
@@ -1330,7 +1658,7 @@ html.panel-resizing .tasks-page-side {
   font-weight: var(--openbot-weight-medium);
   overflow: hidden;
   cursor: pointer;
-  transition: filter 120ms ease, transform 120ms ease;
+  transition: filter 120ms ease;
 }
 
 .tasks-gantt-bar:hover {

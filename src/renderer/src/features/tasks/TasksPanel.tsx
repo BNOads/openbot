@@ -83,6 +83,7 @@ export function TasksPanel(props: TasksPanelProps) {
       turnProgress={turnProgress()}
       queues={queues()}
       onSelectAgentChat={(agentId) => {
+        props.onBack?.();
         layout.setSidebarView("agents");
         selectAgent(agentId);
       }}

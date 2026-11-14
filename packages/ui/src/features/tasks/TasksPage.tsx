@@ -1,4 +1,11 @@
-import type { AgentApproval, AgentEvent, AgentTask, DraftAttachment, QueueSnapshot } from "@openbot/contracts/ipc";
+import type {
+  AgentApproval,
+  AgentEvent,
+  AgentTask,
+  DraftAttachment,
+  QueueDelivery,
+  QueueSnapshot,
+} from "@openbot/contracts/ipc";
 import type { AppTextKey } from "@openbot/i18n";
 import {
   plainTaskTitle,
@@ -10,15 +17,25 @@ import {
 } from "@openbot/team-client/agent-tasks";
 import {
   ActiveCurrentRow,
+  ArrowDownWideNarrow,
   ArrowUp,
+  Bot,
   Button,
   buttonVariants,
+  CalendarClock,
+  ChartNoAxesColumnIncreasing,
   Check,
   ChevronDown,
   Combobox,
+  Hand,
+  LayoutGrid,
+  ListChecks,
   LoaderCircle,
+  MessageSquare,
   Mic,
+  Pencil,
   Popover,
+  RotateCcw,
   Search,
   X,
 } from "@openbot/ui";
@@ -182,6 +199,16 @@ interface TasksPageProps {
 
 const agentOf = (agents: readonly AgentProfile[], agentId: string) => agents.find((agent) => agent.id === agentId);
 
+/** Only deliveries that are genuinely waiting in the queue (never completed/failed historical turns). */
+function pendingQueueDeliveries(
+  queues: Readonly<Record<string, QueueSnapshot>> | undefined,
+  agentId: string,
+): QueueDelivery[] {
+  const list = queues?.[agentId]?.deliveries;
+  if (!list || list.length === 0) return [];
+  return list.filter((delivery) => delivery.status === "queued" || delivery.status === "starting");
+}
+
 /** The trigger motion of the header model switcher: mostly a blur, so the old and new name cross in place. */
 const AGENT_SWAP: SwapMotion = {
   distance: 6,
@@ -198,11 +225,6 @@ const foldChar = (char: string) =>
     .toLowerCase()
     .replace(/[\s_/-]/g, " ");
 
-/**
- * The folded text, and for each of its code units the index of the character in `text` that made
- * it. Folding can change the length, so this map finds the matched part in the original name.
- * A run of spaces and separators becomes one space: "Sales - EU" is "sales eu".
- */
 function foldName(text: string) {
   let folded = "";
   const source: number[] = [];
@@ -217,7 +239,6 @@ function foldName(text: string) {
   return { folded, source };
 }
 
-/** Where `query` is in `name`, and its rank: 0 at the start, 1 at the start of a word, 2 in a word. */
 function findMatch(name: string, query: string): { at: number; rank: number } | undefined {
   if (name.startsWith(query)) return { at: 0, rank: 0 };
   const first = name.indexOf(query);
@@ -227,7 +248,6 @@ function findMatch(name: string, query: string): { at: number; rank: number } | 
   return first < 0 ? undefined : { at: first, rank: 2 };
 }
 
-/** Names that start with the query, or have a word that does, come before names that only contain it. */
 function matchAgents(agents: readonly AgentProfile[], query: string): AgentProfile[] {
   const text = foldName(query.trim()).folded;
   if (!text) return [...agents];
@@ -240,7 +260,6 @@ function matchAgents(agents: readonly AgentProfile[], query: string): AgentProfi
     .map((row) => row.agent);
 }
 
-/** The agent name with the matched part in bold, so the eye finds why a row is in the list. */
 function MatchedAgentName(props: { name: string; query: string }) {
   const parts = createMemo(() => {
     const text = foldName(props.query.trim()).folded;
@@ -266,31 +285,17 @@ function MatchedAgentName(props: { name: string; query: string }) {
   );
 }
 
-/**
- * Kobalte finds a row with an unescaped `[data-key="…"]` selector, to scroll it into view and to
- * name the active row. A key with `"`, `\` or U+0000 matches no row, so the key is encoded.
- */
 const agentKey = (id: string) => encodeURIComponent(id);
 
-/**
- * True when the window has space under the trigger for the search field and three rows. The menu
- * opens down, and opens up only when it would show no row there.
- */
 function roomBelow(trigger: HTMLElement | undefined): boolean {
   if (!trigger) return true;
   const row = Number.parseFloat(getComputedStyle(trigger).getPropertyValue("--openbot-control-md")) || 32;
   return window.innerHeight - trigger.getBoundingClientRect().bottom >= 5 * row;
 }
 
-/**
- * The agent of a task, as a menu with the agent's face and a search field. A server can have many
- * agents: typing filters the rows, the arrows move through them, and Enter takes the active row or
- * the first match. A task has one agent, so the menu marks only the chosen agent.
- */
 function TaskAgentSelect(props: {
   agents: AgentProfile[];
   agentId: string;
-  /** The task title, when the select changes the agent of a task that is already sent. */
   title?: string;
   onChange: (agentId: string) => void;
 }) {
@@ -301,8 +306,6 @@ function TaskAgentSelect(props: {
   const [query, setQuery] = createSignal("");
   const matches = createMemo(() => matchAgents(props.agents, query()));
   const fades = createScrollFades();
-  // Kobalte scrolls the current row into view before the list has its final height. So when the
-  // list resizes, the active row comes back into view.
   let resize: ResizeObserver | undefined;
   const keepActiveRow = () => {
     const id = input?.getAttribute("aria-activedescendant");
@@ -334,7 +337,6 @@ function TaskAgentSelect(props: {
       onOpenChange={toggle}
       placement={placement()}
       gutter={4}
-      // The list shrinks to the space next to the trigger, so it does not flip when a search adds rows.
       flip={false}
       modal
     >
@@ -349,13 +351,11 @@ function TaskAgentSelect(props: {
             : t("conversation.tasks.page.reassign", { title: props.title, name: agent()?.name ?? props.agentId })
         }
         onKeyDown={(event: KeyboardEvent) => {
-          // The arrow keys open the menu, as on a select.
           if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
           event.preventDefault();
           toggle(true);
         }}
       >
-        {/* Keyed by agent, so the face of a newly chosen agent springs in, as the model mark does. */}
         <For each={[props.agentId]} keyed={(id) => id}>
           {(id) => {
             const entering = untrack(id) !== shownId;
@@ -393,7 +393,6 @@ function TaskAgentSelect(props: {
             defaultFilter={() => true}
             onInputChange={(value) => {
               setQuery(value);
-              // A new search starts at the best match.
               if (list) list.scrollTop = 0;
             }}
             onOpenChange={(next) => {
@@ -406,7 +405,6 @@ function TaskAgentSelect(props: {
               <Combobox.Item
                 item={item.item}
                 class="tasks-page-agent-option"
-                // The combobox has no selection, so the row says that it is the current agent.
                 aria-selected={item.item.rawValue.id === props.agentId ? "true" : "false"}
               >
                 <AgentAvatar agent={item.item.rawValue} class="tasks-page-avatar" />
@@ -429,7 +427,6 @@ function TaskAgentSelect(props: {
                 autocomplete="off"
                 spellcheck={false}
                 onKeyDown={(event: KeyboardEvent) => {
-                  // After typing, no row is active: then Enter takes the first match.
                   if (event.key !== "Enter" || event.isComposing || !query().trim()) return;
                   if (input?.getAttribute("aria-activedescendant")) return;
                   const [first] = matches();
@@ -465,17 +462,12 @@ function TaskAgentSelect(props: {
   );
 }
 
-/**
- * The composer of the Tasks page: the conversation composer, and the agent selector in its toolbar.
- * Enter starts the task and Shift+Enter adds a line. The microphone dictates the task, as in a chat.
- */
 function TasksComposer(props: TasksPageProps) {
   const { t } = useText();
   const phase = (): VoicePhase => props.voice?.phase ?? "idle";
   const busy = () => phase() === "requesting" || phase() === "preparing" || phase() === "transcribing";
   const draftRows = createComposerRowsResize();
   const hasRow = () => (props.rowFiles?.length ?? 0) > 0 || (props.pendingImages?.length ?? 0) > 0;
-  // A start of files only names them, so it has a title too.
   const canStart = () =>
     phase() === "recording" ||
     (phase() === "idle" && (plainTaskTitle(props.draft) !== "" || (props.files?.length ?? 0) > 0));
@@ -510,7 +502,6 @@ function TasksComposer(props: TasksPageProps) {
       <form
         ref={draftRows.form}
         class="composer"
-        // One row, as the chat input. With files, the file row is above the text and the agent is under it.
         data-compact={hasRow() ? undefined : ""}
         data-has-attachments={hasRow() ? "" : undefined}
         onSubmit={(event) => {
@@ -586,7 +577,6 @@ function TasksComposer(props: TasksPageProps) {
   );
 }
 
-/** The line under the composer after a start: the agent that took the task, Undo, and Open. */
 function TaskTookLine(props: TasksPageProps & { took: TasksTook }) {
   const { t } = useText();
   const agent = () => agentOf(props.agents, props.took.task.agentId);
@@ -630,7 +620,6 @@ function TaskTookLine(props: TasksPageProps & { took: TasksTook }) {
   );
 }
 
-/** One task in the list: its mark, title and state, and the face of its agent at the end. */
 function TaskRow(props: {
   task: AgentTask;
   agent: AgentProfile | undefined;
@@ -658,16 +647,24 @@ function TaskRow(props: {
       <span class="tasks-page-row-title" title={props.task.title}>
         {props.task.title}
       </span>
+      <span class="tasks-row-meta-date">{formatShortDatePt(props.task.updatedAt || props.task.createdAt)}</span>
       <span class="tasks-page-status" data-tone={props.wait ? "attention" : taskTone(props.task)}>
         {status()}
       </span>
-      <AgentAvatar agent={props.agent} class="tasks-page-avatar" />
+      <span class="tasks-row-agent-chip">
+        <AgentAvatar agent={props.agent} class="tasks-page-avatar" />
+        <span class="tasks-row-agent-name">{props.agent?.name ?? props.task.agentId}</span>
+      </span>
     </Button>
   );
 }
 
 export type TasksHubViewMode = "kanban" | "gantt" | "list";
 export type GanttRangeKey = "6h" | "24h" | "7d" | "30d";
+export type TaskDateFilterPreset = "all" | "today" | "24h" | "7d" | "30d" | "custom";
+export type TaskStatusFilter = "all" | "attention" | "queued" | "running" | "delivered" | "closed";
+export type TaskOriginFilter = "all" | "user" | "agent";
+export type TaskSortOrder = "newest" | "oldest" | "priority" | "agent";
 
 const VIEW_MODE_STORAGE_KEY = "openbot:tasks-view-mode:v1";
 
@@ -703,6 +700,22 @@ function formatRelativeTimePt(isoOrMs: string | number | null | undefined): stri
   return `há ${diffDays}d`;
 }
 
+function formatShortDatePt(isoOrMs: string | number | null | undefined): string {
+  if (!isoOrMs) return "";
+  const time = typeof isoOrMs === "number" ? isoOrMs : Date.parse(isoOrMs);
+  if (!Number.isFinite(time)) return "";
+  const d = new Date(time);
+  const now = new Date();
+  const sameDay =
+    d.getFullYear() === now.getFullYear() &&
+    d.getMonth() === now.getMonth() &&
+    d.getDate() === now.getDate();
+  if (sameDay) {
+    return `Hoje, ${d.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}`;
+  }
+  return d.toLocaleDateString("pt-BR", { day: "2-digit", month: "short" });
+}
+
 function formatDurationPt(startMs: number, endMs: number): string {
   const sec = Math.max(1, Math.floor((endMs - startMs) / 1000));
   if (sec < 60) return `${sec}s`;
@@ -712,6 +725,361 @@ function formatDurationPt(startMs: number, endMs: number): string {
   if (hrs < 24) return `${hrs}h ${min % 60}m`;
   const days = Math.floor(hrs / 24);
   return `${days}d ${hrs % 24}h`;
+}
+
+function matchesDateFilter(
+  isoString: string | null | undefined,
+  preset: TaskDateFilterPreset,
+  customFrom: string,
+  customTo: string,
+): boolean {
+  if (preset === "all") return true;
+  if (!isoString) return true;
+  const ts = Date.parse(isoString);
+  if (!Number.isFinite(ts)) return true;
+  const now = Date.now();
+  if (preset === "today") {
+    const startOfToday = new Date();
+    startOfToday.setHours(0, 0, 0, 0);
+    return ts >= startOfToday.getTime();
+  }
+  if (preset === "24h") return ts >= now - 24 * 3600 * 1000;
+  if (preset === "7d") return ts >= now - 7 * 24 * 3600 * 1000;
+  if (preset === "30d") return ts >= now - 30 * 24 * 3600 * 1000;
+  if (preset === "custom") {
+    if (customFrom) {
+      const fromMs = Date.parse(`${customFrom}T00:00:00`);
+      if (Number.isFinite(fromMs) && ts < fromMs) return false;
+    }
+    if (customTo) {
+      const toMs = Date.parse(`${customTo}T23:59:59.999`);
+      if (Number.isFinite(toMs) && ts > toMs) return false;
+    }
+  }
+  return true;
+}
+
+const DATE_PRESET_LABELS: Record<TaskDateFilterPreset, string> = {
+  all: "Todo o período",
+  today: "Hoje",
+  "24h": "Últimas 24h",
+  "7d": "Últimos 7 dias",
+  "30d": "Últimos 30 dias",
+  custom: "Personalizado",
+};
+
+const SORT_LABELS: Record<TaskSortOrder, string> = {
+  newest: "Mais recentes",
+  oldest: "Mais antigos",
+  priority: "Prioridade",
+  agent: "Por Bot (A–Z)",
+};
+
+/** Searchable Bot Filter Dropdown — replaces the cluttered wall of 18 bot buttons. */
+function TaskBotFilterDropdown(props: {
+  agents: readonly AgentProfile[];
+  tasks: readonly AgentTask[];
+  activeTurns?: Readonly<Record<string, string | null>> | undefined;
+  selectedAgentId: string;
+  onSelectAgent: (agentId: string) => void;
+}) {
+  const [open, setOpen] = createSignal(false);
+  const [query, setQuery] = createSignal("");
+  let panel: HTMLElement | undefined;
+
+  const selectedAgent = () => agentOf(props.agents, props.selectedAgentId);
+  const filteredAgents = createMemo(() => matchAgents(props.agents, query()));
+
+  const countForAgent = (agentId: string) =>
+    props.tasks.filter((t) => t.agentId === agentId && t.state !== "closed").length +
+    (props.activeTurns?.[agentId] ? 1 : 0);
+
+  return (
+    <Popover.Root
+      open={open()}
+      onOpenChange={(next) => {
+        if (next) setQuery("");
+        setOpen(next);
+      }}
+      placement="bottom-start"
+      gutter={6}
+    >
+      <Popover.Trigger
+        class={`${buttonVariants({ variant: props.selectedAgentId ? "secondary" : "ghost", size: "sm" })} tasks-filter-trigger`}
+        aria-label="Filtrar por Bot"
+      >
+        <Show
+          when={selectedAgent()}
+          fallback={
+            <>
+              <Bot class="tasks-filter-icon" aria-hidden="true" />
+              <span>Todos os Bots</span>
+              <span class="tasks-filter-pill-count">{props.agents.length}</span>
+            </>
+          }
+        >
+          {(agent) => (
+            <>
+              <AgentAvatar agent={agent()} class="tasks-page-avatar" />
+              <span class="tasks-filter-trigger-label">{agent().name}</span>
+            </>
+          )}
+        </Show>
+        <ChevronDown class="tasks-page-agent-chevron" aria-hidden="true" />
+      </Popover.Trigger>
+      <Popover.Portal>
+        <Popover.Content
+          ref={(el: HTMLElement) => {
+            panel = el;
+          }}
+          class="ui-action-menu tasks-filter-popover tasks-bot-filter-popover"
+          aria-label="Selecionar Bot"
+        >
+          <ContentExitMotion panel={() => panel} />
+          <div class="tasks-filter-search-box">
+            <Search aria-hidden="true" />
+            <input
+              type="search"
+              placeholder="Buscar bot pelo nome..."
+              value={query()}
+              onInput={(e) => setQuery(e.currentTarget.value)}
+            />
+            <Show when={query()}>
+              <button
+                type="button"
+                class="tasks-filter-search-clear"
+                aria-label="Limpar busca de bot"
+                onClick={() => setQuery("")}
+              >
+                <X aria-hidden="true" />
+              </button>
+            </Show>
+          </div>
+          <div class="tasks-filter-menu-list">
+            <button
+              type="button"
+              class="tasks-filter-menu-item"
+              data-selected={props.selectedAgentId === "" ? "" : undefined}
+              onClick={() => {
+                props.onSelectAgent("");
+                setOpen(false);
+              }}
+            >
+              <Bot class="tasks-filter-icon" aria-hidden="true" />
+              <span class="tasks-filter-menu-item-name">Todos os Bots</span>
+              <span class="tasks-filter-menu-badge">{props.agents.length}</span>
+              <Show when={props.selectedAgentId === ""}>
+                <Check class="tasks-page-agent-check" aria-hidden="true" />
+              </Show>
+            </button>
+            <For each={filteredAgents()}>
+              {(agent) => {
+                const count = () => countForAgent(agent.id);
+                return (
+                  <button
+                    type="button"
+                    class="tasks-filter-menu-item"
+                    data-selected={props.selectedAgentId === agent.id ? "" : undefined}
+                    onClick={() => {
+                      props.onSelectAgent(agent.id);
+                      setOpen(false);
+                    }}
+                  >
+                    <AgentAvatar agent={agent} class="tasks-page-avatar" />
+                    <MatchedAgentName name={agent.name} query={query()} />
+                    <Show when={count() > 0}>
+                      <span class="tasks-filter-menu-badge" data-active="">
+                        {count()}
+                      </span>
+                    </Show>
+                    <Show when={props.selectedAgentId === agent.id}>
+                      <Check class="tasks-page-agent-check" aria-hidden="true" />
+                    </Show>
+                  </button>
+                );
+              }}
+            </For>
+          </div>
+        </Popover.Content>
+      </Popover.Portal>
+    </Popover.Root>
+  );
+}
+
+/** Date / Period Filter Popover with quick presets and custom date range inputs. */
+function TaskDateFilterDropdown(props: {
+  preset: TaskDateFilterPreset;
+  onPresetChange: (preset: TaskDateFilterPreset) => void;
+  customFrom: string;
+  onCustomFromChange: (val: string) => void;
+  customTo: string;
+  onCustomToChange: (val: string) => void;
+}) {
+  const [open, setOpen] = createSignal(false);
+  let panel: HTMLElement | undefined;
+
+  const activeLabel = () => {
+    if (props.preset === "custom" && (props.customFrom || props.customTo)) {
+      const fromStr = props.customFrom ? props.customFrom.slice(5).replace("-", "/") : "Início";
+      const toStr = props.customTo ? props.customTo.slice(5).replace("-", "/") : "Hoje";
+      return `${fromStr} – ${toStr}`;
+    }
+    return DATE_PRESET_LABELS[props.preset];
+  };
+
+  return (
+    <Popover.Root open={open()} onOpenChange={setOpen} placement="bottom-start" gutter={6}>
+      <Popover.Trigger
+        class={`${buttonVariants({ variant: props.preset !== "all" ? "secondary" : "ghost", size: "sm" })} tasks-filter-trigger`}
+        aria-label="Filtrar por data"
+      >
+        <CalendarClock class="tasks-filter-icon" aria-hidden="true" />
+        <span>{activeLabel()}</span>
+        <ChevronDown class="tasks-page-agent-chevron" aria-hidden="true" />
+      </Popover.Trigger>
+      <Popover.Portal>
+        <Popover.Content
+          ref={(el: HTMLElement) => {
+            panel = el;
+          }}
+          class="ui-action-menu tasks-filter-popover tasks-date-filter-popover"
+          aria-label="Período de data"
+        >
+          <ContentExitMotion panel={() => panel} />
+          <div class="tasks-filter-menu-section-title">Período</div>
+          <div class="tasks-filter-menu-list">
+            {(["all", "today", "24h", "7d", "30d", "custom"] as const).map((key) => (
+              <button
+                type="button"
+                class="tasks-filter-menu-item"
+                data-selected={props.preset === key ? "" : undefined}
+                onClick={() => {
+                  props.onPresetChange(key);
+                  if (key !== "custom") setOpen(false);
+                }}
+              >
+                <span class="tasks-filter-menu-item-name">{DATE_PRESET_LABELS[key]}</span>
+                <Show when={props.preset === key}>
+                  <Check class="tasks-page-agent-check" aria-hidden="true" />
+                </Show>
+              </button>
+            ))}
+          </div>
+          <Show when={props.preset === "custom"}>
+            <div class="tasks-custom-date-box">
+              <label class="tasks-custom-date-field">
+                <span>De</span>
+                <input
+                  type="date"
+                  value={props.customFrom}
+                  onInput={(e) => props.onCustomFromChange(e.currentTarget.value)}
+                />
+              </label>
+              <label class="tasks-custom-date-field">
+                <span>Até</span>
+                <input
+                  type="date"
+                  value={props.customTo}
+                  onInput={(e) => props.onCustomToChange(e.currentTarget.value)}
+                />
+              </label>
+            </div>
+          </Show>
+        </Popover.Content>
+      </Popover.Portal>
+    </Popover.Root>
+  );
+}
+
+/** Origin & Sort Dropdown for fine-grained control. */
+function TaskSortAndOriginDropdown(props: {
+  sortBy: TaskSortOrder;
+  onSortChange: (sort: TaskSortOrder) => void;
+  originFilter: TaskOriginFilter;
+  onOriginChange: (origin: TaskOriginFilter) => void;
+  includeClosed: boolean;
+  onIncludeClosedChange: (next: boolean) => void;
+}) {
+  const [open, setOpen] = createSignal(false);
+  let panel: HTMLElement | undefined;
+  const hasCustom = () => props.sortBy !== "newest" || props.originFilter !== "all" || !props.includeClosed;
+
+  return (
+    <Popover.Root open={open()} onOpenChange={setOpen} placement="bottom-end" gutter={6}>
+      <Popover.Trigger
+        class={`${buttonVariants({ variant: hasCustom() ? "secondary" : "ghost", size: "sm" })} tasks-filter-trigger`}
+        aria-label="Ordenar e filtrar origem"
+      >
+        <ArrowDownWideNarrow class="tasks-filter-icon" aria-hidden="true" />
+        <span>{SORT_LABELS[props.sortBy]}</span>
+        <ChevronDown class="tasks-page-agent-chevron" aria-hidden="true" />
+      </Popover.Trigger>
+      <Popover.Portal>
+        <Popover.Content
+          ref={(el: HTMLElement) => {
+            panel = el;
+          }}
+          class="ui-action-menu tasks-filter-popover tasks-sort-popover"
+          aria-label="Opções de ordenação e origem"
+        >
+          <ContentExitMotion panel={() => panel} />
+          <div class="tasks-filter-menu-section-title">Ordenar por</div>
+          <div class="tasks-filter-menu-list">
+            {(["newest", "oldest", "priority", "agent"] as const).map((key) => (
+              <button
+                type="button"
+                class="tasks-filter-menu-item"
+                data-selected={props.sortBy === key ? "" : undefined}
+                onClick={() => props.onSortChange(key)}
+              >
+                <span class="tasks-filter-menu-item-name">{SORT_LABELS[key]}</span>
+                <Show when={props.sortBy === key}>
+                  <Check class="tasks-page-agent-check" aria-hidden="true" />
+                </Show>
+              </button>
+            ))}
+          </div>
+          <div class="tasks-filter-divider" />
+          <div class="tasks-filter-menu-section-title">Origem da Tarefa</div>
+          <div class="tasks-filter-menu-list">
+            {(
+              [
+                ["all", "Todas as origens"],
+                ["user", "Criadas por mim"],
+                ["agent", "Criadas pelos bots"],
+              ] as const
+            ).map(([key, label]) => (
+              <button
+                type="button"
+                class="tasks-filter-menu-item"
+                data-selected={props.originFilter === key ? "" : undefined}
+                onClick={() => props.onOriginChange(key)}
+              >
+                <span class="tasks-filter-menu-item-name">{label}</span>
+                <Show when={props.originFilter === key}>
+                  <Check class="tasks-page-agent-check" aria-hidden="true" />
+                </Show>
+              </button>
+            ))}
+          </div>
+          <div class="tasks-filter-divider" />
+          <div class="tasks-filter-menu-list">
+            <button
+              type="button"
+              class="tasks-filter-menu-item"
+              data-selected={props.includeClosed ? "" : undefined}
+              onClick={() => props.onIncludeClosedChange(!props.includeClosed)}
+            >
+              <span class="tasks-filter-menu-item-name">Mostrar tarefas arquivadas</span>
+              <Show when={props.includeClosed}>
+                <Check class="tasks-page-agent-check" aria-hidden="true" />
+              </Show>
+            </button>
+          </div>
+        </Popover.Content>
+      </Popover.Portal>
+    </Popover.Root>
+  );
 }
 
 interface UnifiedAttentionEntry {
@@ -835,12 +1203,12 @@ function AttentionActionCard(props: {
         </span>
         <span class="tasks-hub-badge" data-tone="attention">
           {props.entry.kind === "approval"
-            ? "🚨 Pede Permissão"
+            ? "Permissão"
             : props.entry.kind === "question"
-              ? "❓ Pergunta p/ Você"
+              ? "Pergunta"
               : props.entry.kind === "browser-takeover"
-                ? "🌐 Assumir Navegador"
-                : "⏳ Depende de Você"}
+                ? "Navegador"
+                : "Aguardando você"}
         </span>
       </div>
 
@@ -937,7 +1305,8 @@ function AttentionActionCard(props: {
                     .finally(() => setBusy(false));
                 }}
               >
-                ✅ Já resolvi, pode seguir
+                <Check class="tasks-action-icon" aria-hidden="true" />
+                <span>Já resolvi</span>
               </Button>
               <Button
                 type="button"
@@ -951,7 +1320,8 @@ function AttentionActionCard(props: {
                   }
                 }}
               >
-                🖐 Abrir Navegador / Chat
+                <Hand class="tasks-action-icon" aria-hidden="true" />
+                <span>Abrir Navegador</span>
               </Button>
             </div>
           </div>
@@ -978,7 +1348,8 @@ function AttentionActionCard(props: {
                 size="xs"
                 onClick={() => props.pageProps.onSelect(task().id)}
               >
-                💬 Ver & Responder
+                <MessageSquare class="tasks-action-icon" aria-hidden="true" />
+                <span>Responder</span>
               </Button>
               <Show when={props.pageProps.onOpenInChat}>
                 <Button
@@ -987,7 +1358,7 @@ function AttentionActionCard(props: {
                   size="xs"
                   onClick={() => props.pageProps.onOpenInChat?.(task())}
                 >
-                  Abrir no Chat
+                  Abrir Chat
                 </Button>
               </Show>
             </div>
@@ -1019,18 +1390,28 @@ function KanbanTaskCard(props: {
     setReplyOpen(false);
   };
 
+  const timestampLabel = () => {
+    const raw = props.task.updatedAt || props.task.createdAt;
+    const shortDate = formatShortDatePt(raw);
+    const rel = formatRelativeTimePt(raw);
+    return shortDate && rel && !shortDate.startsWith("Hoje") ? `${shortDate} · ${rel}` : shortDate || rel;
+  };
+
   return (
     <div
       class="tasks-hub-card"
       data-selected={props.pageProps.selectedId === props.task.id ? "" : undefined}
       data-closed={props.task.state === "closed" ? "" : undefined}
+      data-col-tone={props.column}
     >
       <div class="tasks-hub-card-top">
         <span class="tasks-hub-agent-pill">
           <AgentAvatar agent={agent()} class="tasks-page-avatar" />
           <strong>{agent()?.name ?? props.task.agentId}</strong>
         </span>
-        <span class="tasks-hub-time">{formatRelativeTimePt(props.task.updatedAt || props.task.createdAt)}</span>
+        <span class="tasks-hub-time" title={props.task.updatedAt || props.task.createdAt}>
+          {timestampLabel()}
+        </span>
       </div>
 
       <button
@@ -1070,7 +1451,7 @@ function KanbanTaskCard(props: {
               props.pageProps.onSelect(props.pageProps.selectedId === props.task.id ? null : props.task.id)
             }
           >
-            {props.pageProps.selectedId === props.task.id ? "Fechar painel" : "Ver entrega"}
+            {props.pageProps.selectedId === props.task.id ? "Fechar" : "Detalhes"}
           </Button>
           <Show when={props.column === "delivered" && props.task.state !== "closed"}>
             <Button
@@ -1080,7 +1461,8 @@ function KanbanTaskCard(props: {
               title="Aprovar a entrega do bot e arquivar a tarefa como concluída"
               onClick={() => props.pageProps.onArchiveTask?.(props.task)}
             >
-              ✅ Aprovar
+              <Check class="tasks-action-icon" aria-hidden="true" />
+              <span>Aprovar</span>
             </Button>
           </Show>
           <Show when={props.task.state !== "closed" && props.pageProps.onQuickReplyTask}>
@@ -1088,9 +1470,11 @@ function KanbanTaskCard(props: {
               type="button"
               variant="ghost"
               size="xs"
+              title="Enviar ajuste ou orientação para o bot"
               onClick={() => setReplyOpen((open) => !open)}
             >
-              ✏️ Ajustar
+              <Pencil class="tasks-action-icon" aria-hidden="true" />
+              <span>Ajustar</span>
             </Button>
           </Show>
           <Show when={props.task.state === "closed" && props.pageProps.onReopenTask}>
@@ -1100,7 +1484,8 @@ function KanbanTaskCard(props: {
               size="xs"
               onClick={() => props.pageProps.onReopenTask?.(props.task)}
             >
-              🔄 Reabrir
+              <RotateCcw class="tasks-action-icon" aria-hidden="true" />
+              <span>Reabrir</span>
             </Button>
           </Show>
         </div>
@@ -1117,7 +1502,7 @@ function KanbanTaskCard(props: {
           <input
             type="text"
             class="tasks-hub-quick-reply-input"
-            placeholder={`Passar instrução para ${agent()?.name ?? "o bot"}...`}
+            placeholder={`Orientar ${agent()?.name ?? "o bot"}...`}
             value={replyText()}
             onInput={(event) => setReplyText(event.currentTarget.value)}
           />
@@ -1135,6 +1520,7 @@ function TasksKanbanBoard(props: {
   filteredTasks: readonly AgentTask[];
   attentionEntries: readonly UnifiedAttentionEntry[];
   filterAgentId: string;
+  statusFilter: TaskStatusFilter;
 }) {
   const waitOf = (task: AgentTask) => props.pageProps.waitOf?.(task);
 
@@ -1148,7 +1534,6 @@ function TasksKanbanBoard(props: {
     props.filteredTasks.filter((task) => (task.state === "idle" || task.state === "closed") && !waitOf(task)),
   );
 
-  // Agents actively working in their main chat (outside a task thread) so nothing is hidden!
   const activeMainChatAgents = createMemo(() =>
     props.pageProps.agents.filter((agent) => {
       if (props.filterAgentId && agent.id !== props.filterAgentId) return false;
@@ -1159,17 +1544,16 @@ function TasksKanbanBoard(props: {
     }),
   );
 
-  // Agents with queued messages in their main chat
+  // Only agents that genuinely have status === "queued" | "starting" deliveries in their main chat!
   const queuedMainChatAgents = createMemo(() =>
     props.pageProps.agents.filter((agent) => {
       if (props.filterAgentId && agent.id !== props.filterAgentId) return false;
-      const deliveries = props.pageProps.queues?.[agent.id]?.deliveries ?? [];
-      return deliveries.length > 0;
+      return pendingQueueDeliveries(props.pageProps.queues, agent.id).length > 0;
     }),
   );
 
   return (
-    <div class="tasks-kanban-grid">
+    <div class="tasks-kanban-grid" data-focus-col={props.statusFilter !== "all" ? props.statusFilter : undefined}>
       {/* Column 1: Depende de Mim / Aprovação */}
       <section class="tasks-kanban-col" data-col="attention">
         <header class="tasks-kanban-col-header">
@@ -1182,7 +1566,7 @@ function TasksKanbanBoard(props: {
             when={props.attentionEntries.length > 0}
             fallback={
               <div class="tasks-kanban-empty">
-                🎉 Nenhum bot travado esperando aprovação ou resposta sua agora.
+                Nenhum bot travado aguardando aprovação ou resposta sua.
               </div>
             }
           >
@@ -1207,7 +1591,7 @@ function TasksKanbanBoard(props: {
           >
             <For each={queuedMainChatAgents()}>
               {(agent) => {
-                const deliveries = () => props.pageProps.queues?.[agent.id]?.deliveries ?? [];
+                const deliveries = () => pendingQueueDeliveries(props.pageProps.queues, agent.id);
                 return (
                   <div class="tasks-hub-card">
                     <div class="tasks-hub-card-top">
@@ -1216,7 +1600,7 @@ function TasksKanbanBoard(props: {
                         <strong>{agent.name}</strong>
                       </span>
                       <span class="tasks-hub-badge" data-tone="queued">
-                        {deliveries().length} na fila do chat
+                        {deliveries().length} na fila
                       </span>
                     </div>
                     <p class="tasks-hub-card-preview">{deliveries()[0]?.text ?? "Mensagem aguardando turno"}</p>
@@ -1264,7 +1648,7 @@ function TasksKanbanBoard(props: {
                         <strong>{agent.name}</strong>
                       </span>
                       <span class="tasks-hub-badge" data-tone="working">
-                        ⚡ Ativo no Chat
+                        Ativo no Chat
                       </span>
                     </div>
                     <div class="tasks-hub-live-step">
@@ -1302,7 +1686,7 @@ function TasksKanbanBoard(props: {
         <div class="tasks-kanban-col-body">
           <Show
             when={deliveredTasks().length > 0}
-            fallback={<div class="tasks-kanban-empty">Nenhuma entrega concluída ainda.</div>}
+            fallback={<div class="tasks-kanban-empty">Nenhuma entrega concluída neste filtro.</div>}
           >
             <For each={deliveredTasks()}>
               {(task) => <KanbanTaskCard task={task} pageProps={props.pageProps} column="delivered" />}
@@ -1327,7 +1711,7 @@ function TasksGanttTimeline(props: {
   attentionEntries: readonly UnifiedAttentionEntry[];
   filterAgentId: string;
 }) {
-  const [range, setRange] = createSignal<GanttRangeKey>("24h");
+  const [range, setRange] = createSignal<GanttRangeKey>("7d");
   const nowMs = () => Date.now();
   const spanMs = () => GANTT_RANGE_MS[range()];
   const startWindowMs = () => nowMs() - spanMs();
@@ -1393,9 +1777,9 @@ function TasksGanttTimeline(props: {
     const clampedStart = Math.max(windowStart, Math.min(currentNow, start));
     const clampedEnd = Math.max(clampedStart, Math.min(currentNow, end));
     const leftPct = ((clampedStart - windowStart) / span) * 100;
-    const widthPct = Math.max(2.5, ((clampedEnd - clampedStart) / span) * 100);
+    const widthPct = Math.max(3, ((clampedEnd - clampedStart) / span) * 100);
     return {
-      left: `${Math.min(97.5, Math.max(0, leftPct))}%`,
+      left: `${Math.min(97, Math.max(0, leftPct))}%`,
       width: `${Math.min(100 - leftPct, widthPct)}%`,
       durationLabel: formatDurationPt(start, end),
     };
@@ -1404,34 +1788,32 @@ function TasksGanttTimeline(props: {
   return (
     <div class="tasks-gantt-wrap">
       <div class="tasks-gantt-toolbar">
-        <span class="tasks-gantt-toolbar-title">Linha do Tempo de Execução & Entregas por Bot</span>
-        <div class="tasks-gantt-range-group" role="group" aria-label="Período do gráfico de Gantt">
+        <div class="tasks-gantt-legend">
+          <span>
+            <i class="tasks-gantt-dot" data-tone="attention" /> Depende de Mim
+          </span>
+          <span>
+            <i class="tasks-gantt-dot" data-tone="working" /> Fazendo Agora
+          </span>
+          <span>
+            <i class="tasks-gantt-dot" data-tone="queued" /> Na Fila
+          </span>
+          <span>
+            <i class="tasks-gantt-dot" data-tone="delivered" /> Entregue
+          </span>
+        </div>
+        <div class="tasks-gantt-range-group" role="group" aria-label="Janela de tempo do Gantt">
           {(["6h", "24h", "7d", "30d"] as const).map((key) => (
-            <Button
+            <button
               type="button"
-              variant={range() === key ? "secondary" : "ghost"}
-              size="xs"
+              class="tasks-segmented-btn"
+              data-active={range() === key ? "" : undefined}
               onClick={() => setRange(key)}
             >
-              {key === "6h" ? "Últimas 6h" : key === "24h" ? "Hoje (24h)" : key === "7d" ? "7 Dias" : "30 Dias"}
-            </Button>
+              {key === "6h" ? "6h" : key === "24h" ? "24h" : key === "7d" ? "7 Dias" : "30 Dias"}
+            </button>
           ))}
         </div>
-      </div>
-
-      <div class="tasks-gantt-legend">
-        <span>
-          <i class="tasks-gantt-dot" data-tone="attention" /> Depende de Você
-        </span>
-        <span>
-          <i class="tasks-gantt-dot" data-tone="working" /> Fazendo Agora
-        </span>
-        <span>
-          <i class="tasks-gantt-dot" data-tone="queued" /> Na Fila
-        </span>
-        <span>
-          <i class="tasks-gantt-dot" data-tone="delivered" /> Entregue / Concluído
-        </span>
       </div>
 
       <div class="tasks-gantt-board">
@@ -1453,7 +1835,7 @@ function TasksGanttTimeline(props: {
           when={rowsByAgent().length > 0}
           fallback={
             <div class="tasks-kanban-empty">
-              Nenhuma tarefa registrada neste período. Amplie o período para 7d ou 30d acima.
+              Nenhuma tarefa registrada neste período. Selecione 7 Dias ou 30 Dias acima.
             </div>
           }
         >
@@ -1470,12 +1852,12 @@ function TasksGanttTimeline(props: {
                     <strong>{group.agent.name}</strong>
                     <Show when={group.hasAttention}>
                       <span class="tasks-hub-badge" data-tone="attention">
-                        🚨 Depende de você
+                        Depende de você
                       </span>
                     </Show>
                     <Show when={group.isWorkingMain}>
                       <span class="tasks-hub-badge" data-tone="working">
-                        ⚡ Em execução
+                        Em execução
                       </span>
                     </Show>
                   </button>
@@ -1551,7 +1933,6 @@ const SECTION_TITLE = {
   closed: "conversation.threads.archived",
 } as const satisfies Record<TasksSectionId, AppTextKey>;
 
-/** The tasks by what they need, each section with its heading. The archived tasks are faded. */
 function TasksList(props: {
   pageProps: TasksPageProps;
   filteredTasks: readonly AgentTask[];
@@ -1568,8 +1949,9 @@ function TasksList(props: {
       <Show when={props.attentionEntries.length > 0}>
         <section class="tasks-hub-urgent-banner" aria-label="Pendências que dependem de você">
           <header class="tasks-hub-urgent-header">
-            <strong>🚨 Central de Aprovação Rápida — Depende de Você ({props.attentionEntries.length})</strong>
-            <span>Aprove ferramentas, responda dúvidas ou assuma o navegador sem precisar entrar em cada chat</span>
+            <span class="tasks-kanban-col-dot" data-tone="attention" />
+            <strong>Central de Aprovação Rápida ({props.attentionEntries.length})</strong>
+            <span>Aprove ferramentas, responda perguntas ou assuma o navegador direto daqui</span>
           </header>
           <div class="tasks-hub-urgent-grid">
             <For each={props.attentionEntries}>
@@ -1616,7 +1998,8 @@ function TasksList(props: {
                             title="Aprovar entrega e concluir tarefa"
                             onClick={() => props.pageProps.onArchiveTask?.(task())}
                           >
-                            ✅ Aprovar
+                            <Check class="tasks-action-icon" aria-hidden="true" />
+                            <span>Aprovar</span>
                           </Button>
                         </Show>
                       </div>
@@ -1650,18 +2033,11 @@ function TasksList(props: {
   );
 }
 
-/** The close transition is 200ms; this ends a close whose `transitionend` does not come. */
 const SIDE_CLOSE_FALLBACK_MS = 300;
-
 export const TASKS_SIDE_DEFAULT = 420;
 export const TASKS_SIDE_MIN = 320;
-/** What the list keeps for itself, however far the side panel is dragged. */
 const TASKS_LIST_MIN = 320;
 
-/**
- * The task panel at the right of the page. It makes the list narrower; it does not cover it. The
- * panel slides in from the right and out again, so it stays shown until its close ends.
- */
 function TasksSidePanel(props: {
   tasks: readonly AgentTask[];
   taskId: string | null;
@@ -1676,11 +2052,9 @@ function TasksSidePanel(props: {
   const [view, setView] = createStore<{
     shownId: string | null;
     closing: boolean;
-    /** The width of the page, once measured. A narrow page makes the panel narrower, not the saved width. */
     pageWidth: number | null;
   }>({ shownId: untrack(() => props.taskId), closing: false, pageWidth: null });
   let side: HTMLDivElement | undefined;
-  /** The list keeps its minimum; a page too narrow for both keeps the panel minimum. */
   const maxFor = (page: number | null | undefined) =>
     page == null ? Number.POSITIVE_INFINITY : Math.max(TASKS_SIDE_MIN, page - TASKS_LIST_MIN);
   const width = () => Math.round(Math.min(maxFor(view.pageWidth), Math.max(TASKS_SIDE_MIN, props.width)));
@@ -1716,7 +2090,6 @@ function TasksSidePanel(props: {
     const id = view.shownId;
     return id && props.tasks.some((task) => task.id === id) ? id : null;
   };
-  /* The first task of an open slides in with the panel; only a change to a different task fades in. */
   let contentId: string | null = null;
   return (
     <Show when={shown()}>
@@ -1724,8 +2097,6 @@ function TasksSidePanel(props: {
         onCleanup(() => {
           contentId = null;
         });
-        // Escape closes the panel, as on the settings page: on the document and after the delegated
-        // handlers, so a control that handles Escape keeps it. An open popup or another text field also keeps it.
         onSettled(() => {
           const closeOnEscape = (event: KeyboardEvent) => {
             if (event.key !== "Escape" || event.defaultPrevented || event.isComposing) return;
@@ -1773,7 +2144,6 @@ function TasksSidePanel(props: {
                 })
               }
             />
-            {/* The panel clips its content while it opens and closes; the edge handle stays outside the clip. */}
             <div class="tasks-page-side-clip">
               <For each={[taskId()]} keyed={(id) => id}>
                 {(id) => {
@@ -1795,21 +2165,46 @@ function TasksSidePanel(props: {
   );
 }
 
-/**
- * The Tasks page of a server, on desktop and on the web: one calm column for the tasks of all agents.
- * The composer is at the top, with the agent selector. Below it, the tasks by what they need. A start
- * can be undone for a few seconds. A task opens in the panel beside the list.
- */
 export function TasksPage(props: TasksPageProps) {
   const { t } = useText();
   const headingId = createUniqueId();
+  let searchInputRef: HTMLInputElement | undefined;
+
   const [viewMode, setViewMode] = createSignal<TasksHubViewMode>(readSavedViewMode());
   const [filterAgentId, setFilterAgentId] = createSignal<string>("");
   const [searchQuery, setSearchQuery] = createSignal<string>("");
+  const [datePreset, setDatePreset] = createSignal<TaskDateFilterPreset>("all");
+  const [customDateFrom, setCustomDateFrom] = createSignal<string>("");
+  const [customDateTo, setCustomDateTo] = createSignal<string>("");
+  const [statusFilter, setStatusFilter] = createSignal<TaskStatusFilter>("all");
+  const [originFilter, setOriginFilter] = createSignal<TaskOriginFilter>("all");
+  const [sortBy, setSortBy] = createSignal<TaskSortOrder>("newest");
+  const [includeClosed, setIncludeClosed] = createSignal<boolean>(true);
 
   const changeViewMode = (mode: TasksHubViewMode) => {
     setViewMode(mode);
     saveViewMode(mode);
+  };
+
+  const hasActiveFilters = () =>
+    filterAgentId() !== "" ||
+    searchQuery().trim() !== "" ||
+    datePreset() !== "all" ||
+    statusFilter() !== "all" ||
+    originFilter() !== "all" ||
+    sortBy() !== "newest" ||
+    !includeClosed();
+
+  const clearAllFilters = () => {
+    setFilterAgentId("");
+    setSearchQuery("");
+    setDatePreset("all");
+    setCustomDateFrom("");
+    setCustomDateTo("");
+    setStatusFilter("all");
+    setOriginFilter("all");
+    setSortBy("newest");
+    setIncludeClosed(true);
   };
 
   const attentionEntries = createMemo(() =>
@@ -1819,8 +2214,30 @@ export function TasksPage(props: TasksPageProps) {
   const filteredTasks = createMemo(() => {
     const agentFilter = filterAgentId();
     const query = searchQuery().trim().toLowerCase();
-    return props.tasks.filter((task) => {
+    const preset = datePreset();
+    const fromStr = customDateFrom();
+    const toStr = customDateTo();
+    const status = statusFilter();
+    const origin = originFilter();
+    const sort = sortBy();
+    const showClosed = includeClosed();
+
+    const list = props.tasks.filter((task) => {
       if (agentFilter && task.agentId !== agentFilter) return false;
+      if (!showClosed && task.state === "closed") return false;
+      if (origin !== "all" && task.origin !== origin) return false;
+
+      if (!matchesDateFilter(task.updatedAt || task.createdAt, preset, fromStr, toStr)) {
+        return false;
+      }
+
+      const wait = props.waitOf?.(task);
+      if (status === "attention" && !wait) return false;
+      if (status === "queued" && (task.state !== "queued" || wait)) return false;
+      if (status === "running" && (task.state !== "running" || wait)) return false;
+      if (status === "delivered" && (task.state !== "idle" || wait)) return false;
+      if (status === "closed" && task.state !== "closed") return false;
+
       if (!query) return true;
       const agentName = agentOf(props.agents, task.agentId)?.name?.toLowerCase() ?? "";
       return (
@@ -1830,23 +2247,50 @@ export function TasksPage(props: TasksPageProps) {
         agentName.includes(query)
       );
     });
+
+    return [...list].sort((a, b) => {
+      if (sort === "agent") {
+        const nameA = agentOf(props.agents, a.agentId)?.name ?? a.agentId;
+        const nameB = agentOf(props.agents, b.agentId)?.name ?? b.agentId;
+        return nameA.localeCompare(nameB, "pt-BR");
+      }
+      if (sort === "priority") {
+        const score = (task: AgentTask) => {
+          if (props.waitOf?.(task)) return 0;
+          if (task.state === "running") return 1;
+          if (task.state === "queued") return 2;
+          if (task.state === "idle") return 3;
+          return 4;
+        };
+        const diff = score(a) - score(b);
+        if (diff !== 0) return diff;
+      }
+      const timeA = Date.parse(a.updatedAt || a.createdAt) || 0;
+      const timeB = Date.parse(b.updatedAt || b.createdAt) || 0;
+      return sort === "oldest" ? timeA - timeB : timeB - timeA;
+    });
   });
 
   const runningCount = createMemo(
     () =>
       filteredTasks().filter((task) => task.state === "running").length +
-      props.agents.filter((a) => Boolean(props.activeTurns?.[a.id])).length,
+      props.agents.filter((a) => (!filterAgentId() || a.id === filterAgentId()) && Boolean(props.activeTurns?.[a.id]))
+        .length,
   );
   const queuedCount = createMemo(
     () =>
       filteredTasks().filter((task) => task.state === "queued").length +
-      props.agents.reduce((sum, a) => sum + (props.queues?.[a.id]?.deliveries?.length ?? 0), 0),
+      props.agents.reduce(
+        (sum, a) =>
+          sum +
+          (!filterAgentId() || a.id === filterAgentId() ? pendingQueueDeliveries(props.queues, a.id).length : 0),
+        0,
+      ),
   );
   const deliveredCount = createMemo(
     () => filteredTasks().filter((task) => task.state === "idle" || task.state === "closed").length,
   );
 
-  // The first start adds a task that waits, so the page shows the list as soon as the user sends.
   const empty = () =>
     props.loaded === true &&
     props.tasks.length === 0 &&
@@ -1863,14 +2307,67 @@ export function TasksPage(props: TasksPageProps) {
     >
       <div class="tasks-page-scroll">
         <div class="tasks-page-column">
-          <PageHeader
-            class="tasks-page-header"
-            title={t("conversation.tasks.title")}
-            hostName={props.hostName}
-            headingId={headingId}
-            onBack={props.onBack}
-            frame={props.frame}
-          />
+          <div class="tasks-top-header-row">
+            <PageHeader
+              class="tasks-page-header"
+              title={t("conversation.tasks.title")}
+              hostName={props.hostName}
+              headingId={headingId}
+              onBack={props.onBack}
+              frame={props.frame}
+            />
+            <div class="tasks-hub-kpis" role="group" aria-label="Filtrar por status">
+              <button
+                type="button"
+                class="tasks-hub-kpi"
+                data-tone={attentionEntries().length > 0 ? "attention" : "neutral"}
+                data-active={statusFilter() === "attention" ? "" : undefined}
+                onClick={() => setStatusFilter(statusFilter() === "attention" ? "all" : "attention")}
+                title="Clique para filtrar itens que dependem de você"
+              >
+                <span class="tasks-kpi-dot" data-tone="attention" />
+                <strong>{attentionEntries().length}</strong>
+                <span>Depende de Mim</span>
+              </button>
+              <button
+                type="button"
+                class="tasks-hub-kpi"
+                data-tone="queued"
+                data-active={statusFilter() === "queued" ? "" : undefined}
+                onClick={() => setStatusFilter(statusFilter() === "queued" ? "all" : "queued")}
+                title="Clique para filtrar tarefas na fila"
+              >
+                <span class="tasks-kpi-dot" data-tone="queued" />
+                <strong>{queuedCount()}</strong>
+                <span>Na Fila</span>
+              </button>
+              <button
+                type="button"
+                class="tasks-hub-kpi"
+                data-tone="working"
+                data-active={statusFilter() === "running" ? "" : undefined}
+                onClick={() => setStatusFilter(statusFilter() === "running" ? "all" : "running")}
+                title="Clique para filtrar tarefas em execução"
+              >
+                <span class="tasks-kpi-dot" data-tone="working" />
+                <strong>{runningCount()}</strong>
+                <span>Fazendo</span>
+              </button>
+              <button
+                type="button"
+                class="tasks-hub-kpi"
+                data-tone="delivered"
+                data-active={statusFilter() === "delivered" ? "" : undefined}
+                onClick={() => setStatusFilter(statusFilter() === "delivered" ? "all" : "delivered")}
+                title="Clique para filtrar entregas concluídas"
+              >
+                <span class="tasks-kpi-dot" data-tone="delivered" />
+                <strong>{deliveredCount()}</strong>
+                <span>Entregues</span>
+              </button>
+            </div>
+          </div>
+
           <Show when={empty()}>
             <TasksEmptyPitch />
           </Show>
@@ -1879,103 +2376,116 @@ export function TasksPage(props: TasksPageProps) {
             <Show when={props.took}>{(took) => <TaskTookLine {...props} took={took()} />}</Show>
           </div>
 
+          {/* Unified Sleek Filter & View Bar */}
           <div class="tasks-hub-toolbar">
             <div class="tasks-hub-toolbar-row">
-              <div class="tasks-hub-modes" role="tablist" aria-label="Visualização de Tarefas">
-                <Button
+              {/* Segmented View Switcher */}
+              <div class="tasks-segmented-control" role="tablist" aria-label="Modo de visualização">
+                <button
                   type="button"
-                  variant={viewMode() === "kanban" ? "secondary" : "ghost"}
-                  size="sm"
                   role="tab"
+                  class="tasks-segmented-btn"
+                  data-active={viewMode() === "kanban" ? "" : undefined}
                   aria-selected={viewMode() === "kanban" ? "true" : "false"}
                   onClick={() => changeViewMode("kanban")}
                 >
-                  🗂️ Kanban
-                </Button>
-                <Button
+                  <LayoutGrid class="tasks-segmented-icon" aria-hidden="true" />
+                  <span>Kanban</span>
+                </button>
+                <button
                   type="button"
-                  variant={viewMode() === "gantt" ? "secondary" : "ghost"}
-                  size="sm"
                   role="tab"
+                  class="tasks-segmented-btn"
+                  data-active={viewMode() === "gantt" ? "" : undefined}
                   aria-selected={viewMode() === "gantt" ? "true" : "false"}
                   onClick={() => changeViewMode("gantt")}
                 >
-                  📊 Gantt
-                </Button>
-                <Button
+                  <ChartNoAxesColumnIncreasing class="tasks-segmented-icon" aria-hidden="true" />
+                  <span>Gantt</span>
+                </button>
+                <button
                   type="button"
-                  variant={viewMode() === "list" ? "secondary" : "ghost"}
-                  size="sm"
                   role="tab"
+                  class="tasks-segmented-btn"
+                  data-active={viewMode() === "list" ? "" : undefined}
                   aria-selected={viewMode() === "list" ? "true" : "false"}
                   onClick={() => changeViewMode("list")}
                 >
-                  📋 Tarefas
-                </Button>
+                  <ListChecks class="tasks-segmented-icon" aria-hidden="true" />
+                  <span>Lista</span>
+                </button>
               </div>
 
-              <div class="tasks-hub-kpis">
-                <span
-                  class="tasks-hub-kpi"
-                  data-tone={attentionEntries().length > 0 ? "attention" : "neutral"}
-                >
-                  🚨 <strong>{attentionEntries().length}</strong> Depende de Mim
-                </span>
-                <span class="tasks-hub-kpi" data-tone="working">
-                  ⚡ <strong>{runningCount()}</strong> Fazendo
-                </span>
-                <span class="tasks-hub-kpi" data-tone="queued">
-                  ⏳ <strong>{queuedCount()}</strong> Fila
-                </span>
-                <span class="tasks-hub-kpi" data-tone="delivered">
-                  ✅ <strong>{deliveredCount()}</strong> Entregues
-                </span>
-              </div>
-
-              <div class="tasks-hub-search">
-                <Search aria-hidden="true" />
+              {/* Search with Lupa & Clear Button */}
+              <div class="tasks-hub-search" onClick={() => searchInputRef?.focus()}>
+                <Search class="tasks-search-lupa" aria-hidden="true" />
                 <input
+                  ref={(el) => {
+                    searchInputRef = el;
+                  }}
                   type="search"
-                  placeholder="Buscar tarefa, entrega ou bot..."
+                  placeholder="Buscar por tarefa, entrega ou bot..."
                   value={searchQuery()}
                   onInput={(event) => setSearchQuery(event.currentTarget.value)}
                 />
+                <Show when={searchQuery()}>
+                  <button
+                    type="button"
+                    class="tasks-search-clear"
+                    aria-label="Limpar busca"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setSearchQuery("");
+                      searchInputRef?.focus();
+                    }}
+                  >
+                    <X aria-hidden="true" />
+                  </button>
+                </Show>
               </div>
-            </div>
 
-            <div class="tasks-hub-agents-bar" role="group" aria-label="Filtrar por Bot">
-              <Button
-                type="button"
-                variant={filterAgentId() === "" ? "secondary" : "ghost"}
-                size="xs"
-                onClick={() => setFilterAgentId("")}
-              >
-                Todos os Bots ({props.agents.length})
-              </Button>
-              <For each={props.agents}>
-                {(agent) => {
-                  const agentCount = () =>
-                    props.tasks.filter((t) => t.agentId === agent.id && t.state !== "closed").length +
-                    (props.activeTurns?.[agent.id] ? 1 : 0);
-                  return (
-                    <Button
-                      type="button"
-                      variant={filterAgentId() === agent.id ? "secondary" : "ghost"}
-                      size="xs"
-                      class="tasks-hub-agent-filter-btn"
-                      onClick={() =>
-                        setFilterAgentId(filterAgentId() === agent.id ? "" : agent.id)
-                      }
-                    >
-                      <AgentAvatar agent={agent} class="tasks-page-avatar" />
-                      <span>{agent.name}</span>
-                      <Show when={agentCount() > 0}>
-                        <span class="tasks-hub-agent-count">{agentCount()}</span>
-                      </Show>
-                    </Button>
-                  );
-                }}
-              </For>
+              {/* Filter Controls: Bot + Date + Sort/Origin */}
+              <div class="tasks-hub-filters-group">
+                <TaskBotFilterDropdown
+                  agents={props.agents}
+                  tasks={props.tasks}
+                  activeTurns={props.activeTurns}
+                  selectedAgentId={filterAgentId()}
+                  onSelectAgent={setFilterAgentId}
+                />
+
+                <TaskDateFilterDropdown
+                  preset={datePreset()}
+                  onPresetChange={setDatePreset}
+                  customFrom={customDateFrom()}
+                  onCustomFromChange={setCustomDateFrom}
+                  customTo={customDateTo()}
+                  onCustomToChange={setCustomDateTo}
+                />
+
+                <TaskSortAndOriginDropdown
+                  sortBy={sortBy()}
+                  onSortChange={setSortBy}
+                  originFilter={originFilter()}
+                  onOriginChange={setOriginFilter}
+                  includeClosed={includeClosed()}
+                  onIncludeClosedChange={setIncludeClosed}
+                />
+
+                <Show when={hasActiveFilters()}>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    class="tasks-clear-filters-btn"
+                    onClick={clearAllFilters}
+                    title="Limpar todos os filtros ativos"
+                  >
+                    <RotateCcw class="tasks-filter-icon" aria-hidden="true" />
+                    <span>Limpar</span>
+                  </Button>
+                </Show>
+              </div>
             </div>
           </div>
 
@@ -1985,6 +2495,7 @@ export function TasksPage(props: TasksPageProps) {
               filteredTasks={filteredTasks()}
               attentionEntries={attentionEntries()}
               filterAgentId={filterAgentId()}
+              statusFilter={statusFilter()}
             />
           </Show>
           <Show when={viewMode() === "gantt"}>

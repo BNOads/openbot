@@ -71,7 +71,7 @@ export function WorkspaceFrame(props: WorkspaceFrameProps) {
         props.class,
         {
           "app-frame-sidebar-compact": props.compact,
-          "app-frame-sidebar-closed": layout.sidebarClosed(),
+          "app-frame-sidebar-closed": layout.sidebarClosed() || props.windowPage === "tasks",
           "app-frame-edge": platform.appInfo() !== null,
           "app-frame-with-server-rail": layout.serverRailVisible(),
           "app-frame-page-open": pageOpen(),
