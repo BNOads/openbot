@@ -56,7 +56,18 @@ const payloadStart = 8 + origHeaderSize;
 const outRange = rangeOf(header.files.out);
 const pkgEntry = header.files["package.json"];
 const pkgStart = Number(pkgEntry.offset);
-const pkgBuf = origBuf.subarray(payloadStart + pkgStart, payloadStart + pkgStart + pkgEntry.size);
+let pkgBuf = origBuf.subarray(payloadStart + pkgStart, payloadStart + pkgStart + pkgEntry.size);
+try {
+  const repoPkgPath = resolve(outDir, "../package.json");
+  const repoPkg = JSON.parse(readFileSync(repoPkgPath, "utf8"));
+  const asarPkg = JSON.parse(pkgBuf.toString("utf8"));
+  if (repoPkg.version && asarPkg.version !== repoPkg.version) {
+    asarPkg.version = repoPkg.version;
+    pkgBuf = Buffer.from(`${JSON.stringify(asarPkg, null, 2)}\n`, "utf8");
+  }
+} catch {
+  // Keep original package.json buffer if repo package.json is not available
+}
 
 // Prefix before `out` (`node_modules`, `LICENSE`, `NOTICE`) stays untouched at the exact same offsets
 const prefixPayload = origBuf.subarray(payloadStart, payloadStart + outRange.min);
@@ -102,6 +113,7 @@ function buildDirTree(dirPath, relFromOut = "") {
 header.files.out = buildDirTree(outDir);
 header.files["package.json"] = {
   ...pkgEntry,
+  size: pkgBuf.length,
   offset: String(currentOffset),
   integrity: computeIntegrity(pkgBuf),
 };

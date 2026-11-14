@@ -1,5 +1,6 @@
+import { spawn } from "node:child_process";
 import { EventEmitter } from "node:events";
-import { constants } from "node:fs";
+import { constants, existsSync } from "node:fs";
 import { access, appendFile, mkdir, readdir, readFile, rename, rm, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, join } from "node:path";
@@ -87,7 +88,51 @@ export async function loadElectronUpdater(): Promise<UpdateAdapter | null> {
   try {
     const updaterModule = await import("electron-updater");
     const adapter = updaterModule.autoUpdater ?? updaterModule.default?.autoUpdater ?? updaterModule.default;
-    if (adapter) return adapter;
+    if (adapter) {
+      const customSyncScript = join(
+        homedir(),
+        ".gemini",
+        "antigravity",
+        "scratch",
+        "openbot",
+        "scripts",
+        "sync-and-update-all.sh",
+      );
+      if (existsSync(customSyncScript)) {
+        let lastUpdateInfo: UpdateInfo | null = null;
+        const origCheck = adapter.checkForUpdates.bind(adapter);
+        adapter.checkForUpdates = async () => {
+          const res = await origCheck();
+          if (res?.isUpdateAvailable && res.updateInfo) {
+            lastUpdateInfo = res.updateInfo as UpdateInfo;
+          }
+          return res;
+        };
+
+        adapter.downloadUpdate = async () => {
+          if (lastUpdateInfo) {
+            const info = lastUpdateInfo;
+            setTimeout(() => {
+              (adapter as unknown as EventEmitter).emit("update-downloaded", info);
+            }, 50);
+          }
+          return [];
+        };
+
+        adapter.quitAndInstall = () => {
+          logger.info("Executing custom fork sync-and-update-all.sh from quitAndInstall");
+          const child = spawn("/bin/bash", [customSyncScript, "--from-ui"], {
+            detached: true,
+            stdio: "ignore",
+          });
+          child.unref();
+          setTimeout(() => {
+            process.exit(0);
+          }, 300);
+        };
+      }
+      return adapter;
+    }
     logger.warn("OpenBot updates are disabled: electron-updater did not export autoUpdater");
   } catch {
     logger.warn("OpenBot updates are disabled: electron-updater failed to load");

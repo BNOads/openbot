@@ -21,6 +21,9 @@ if [ ! -f "$PROJECT_ROOT/dist/app.asar.orig.bak" ]; then
   cat "$APP_PATH/Contents/Resources/app.asar" > "$PROJECT_ROOT/dist/app.asar.orig.bak"
 fi
 cat "$PROJECT_ROOT/dist/app.asar" > "$APP_PATH/Contents/Resources/app.asar"
+REPO_VERSION="$(node -e 'console.log(require(process.argv[1]).version)' "$PROJECT_ROOT/package.json")"
+plutil -replace CFBundleShortVersionString -string "$REPO_VERSION" "$APP_PATH/Contents/Info.plist"
+plutil -replace CFBundleVersion -string "$REPO_VERSION" "$APP_PATH/Contents/Info.plist"
 plutil -replace ElectronAsarIntegrity.Resources/app\\.asar.hash -string "$NEW_HASH" "$APP_PATH/Contents/Info.plist"
 codesign --force --deep --sign - "$APP_PATH"
 
