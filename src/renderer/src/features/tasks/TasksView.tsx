@@ -141,7 +141,7 @@ interface TasksViewProps {
   onRespondBrowserTakeover?: (
     agentId: string,
     threadId: string | undefined,
-    requestId: string,
+    requestId: string | number,
     decision: "complete" | "cancel",
   ) => Promise<boolean>;
   /** Moves the read mark of an open task to a message. Absent where the server keeps no read marks. */

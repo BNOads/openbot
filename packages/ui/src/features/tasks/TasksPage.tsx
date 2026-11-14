@@ -167,7 +167,7 @@ interface TasksPageProps {
   onRespondBrowserTakeover?: (
     agentId: string,
     threadId: string | undefined,
-    requestId: string,
+    requestId: string | number,
     decision: "complete" | "cancel",
   ) => Promise<boolean>;
   onQuickReplyTask?: ((task: AgentTask, text: string) => void) | undefined;
@@ -762,12 +762,12 @@ function collectAttentionEntries(
   for (const [attKey, event] of Object.entries(props.pendingPrompts ?? {})) {
     if (!event) continue;
     const [agentIdFromKey, threadIdFromKey] = attKey.split("\0");
-    const agentId = event.agentId || agentIdFromKey || "";
-    const threadId = event.threadId ?? threadIdFromKey ?? undefined;
-    const task = props.tasks.find(
-      (candidate) => candidate.agentId === agentId && threadId && candidate.threadId === threadId,
-    );
     if (event.type === "prompt") {
+      const agentId = event.agentId || agentIdFromKey || "";
+      const threadId = event.threadId ?? threadIdFromKey ?? undefined;
+      const task = props.tasks.find(
+        (candidate) => candidate.agentId === agentId && threadId && candidate.threadId === threadId,
+      );
       const qText = event.questions.map((q) => q.question).join(" ");
       if (!matchesFilter(agentId, `${qText} ${task?.title ?? ""}`)) continue;
       const key = `prompt:${agentId}:${String(event.requestId)}`;
@@ -782,9 +782,14 @@ function collectAttentionEntries(
         promptEvent: event,
       });
     } else if (event.type === "browser-takeover-requested") {
-      if (!matchesFilter(agentId, `${event.request.instructions} ${event.request.url ?? ""} ${task?.title ?? ""}`))
-        continue;
-      const key = `takeover:${agentId}:${event.request.requestId}`;
+      const agentId = event.request.agentId || agentIdFromKey || "";
+      const threadId = event.request.threadId ?? threadIdFromKey ?? undefined;
+      const task = props.tasks.find(
+        (candidate) => candidate.agentId === agentId && threadId && candidate.threadId === threadId,
+      );
+      const takeoverDesc = event.request.reason ?? "Assumir controle do navegador";
+      if (!matchesFilter(agentId, `${takeoverDesc} ${task?.title ?? ""}`)) continue;
+      const key = `takeover:${agentId}:${String(event.request.requestId)}`;
       seenKeys.add(key);
       if (task) seenKeys.add(`task:${task.id}`);
       entries.push({
@@ -801,7 +806,7 @@ function collectAttentionEntries(
   for (const task of props.tasks) {
     const wait = props.waitOf?.(task);
     if (!wait || seenKeys.has(`task:${task.id}`)) continue;
-    if (!matchesFilter(task.agentId, `${task.title} ${task.latestPreview ?? ""}`)) continue;
+    if (!matchesFilter(task.agentId, `${task.title} ${task.progress ?? task.error ?? ""}`)) continue;
     entries.push({
       key: `task:${task.id}`,
       agentId: task.agentId,
@@ -856,15 +861,23 @@ function AttentionActionCard(props: {
           <div class="tasks-hub-inline-prompt">
             <ApprovalCard
               approval={approval()}
-              onApprove={() => {
-                if (!props.pageProps.onRespondApproval) return;
+              onApprove={async () => {
+                if (!props.pageProps.onRespondApproval) return false;
                 setBusy(true);
-                void props.pageProps.onRespondApproval(approval(), "accept").finally(() => setBusy(false));
+                try {
+                  return await props.pageProps.onRespondApproval(approval(), "accept");
+                } finally {
+                  setBusy(false);
+                }
               }}
-              onReject={() => {
-                if (!props.pageProps.onRespondApproval) return;
+              onReject={async () => {
+                if (!props.pageProps.onRespondApproval) return false;
                 setBusy(true);
-                void props.pageProps.onRespondApproval(approval(), "decline").finally(() => setBusy(false));
+                try {
+                  return await props.pageProps.onRespondApproval(approval(), "decline");
+                } finally {
+                  setBusy(false);
+                }
               }}
             />
           </div>
@@ -877,6 +890,7 @@ function AttentionActionCard(props: {
             <QuestionPromptBubble
               questions={promptEvent().questions}
               sendShortcut={props.pageProps.sendShortcut}
+              onOpenLink={(url) => window.open(url, "_blank")}
               onSubmit={async (answers) => {
                 if (!props.pageProps.onAnswerPrompt) return false;
                 setBusy(true);
@@ -899,14 +913,15 @@ function AttentionActionCard(props: {
       <Show when={props.entry.takeoverEvent}>
         {(takeover) => (
           <div class="tasks-hub-takeover-box">
-            <p class="tasks-hub-card-preview">{takeover().request.instructions}</p>
-            <Show when={takeover().request.url}>
-              {(url) => <span class="tasks-hub-url-chip">{url()}</span>}
-            </Show>
+            <p class="tasks-hub-card-preview">
+              {takeover().request.reason === "sign-in-blocked"
+                ? "O site bloqueou o login automático. Assuma o navegador para concluir o acesso."
+                : "O bot pausou e está aguardando sua ação (login, QR Code ou confirmação) no navegador."}
+            </p>
             <div class="tasks-hub-card-actions">
               <Button
                 type="button"
-                variant="primary"
+                variant="default"
                 size="xs"
                 loading={busy()}
                 onClick={() => {
@@ -953,13 +968,13 @@ function AttentionActionCard(props: {
       >
         {(task) => (
           <div class="tasks-hub-takeover-box">
-            <Show when={task().latestPreview}>
-              <p class="tasks-hub-card-preview">{task().latestPreview}</p>
+            <Show when={task().progress ?? task().error}>
+              {(preview) => <p class="tasks-hub-card-preview">{preview()}</p>}
             </Show>
             <div class="tasks-hub-card-actions">
               <Button
                 type="button"
-                variant="primary"
+                variant="default"
                 size="xs"
                 onClick={() => props.pageProps.onSelect(task().id)}
               >
@@ -1029,7 +1044,7 @@ function KanbanTaskCard(props: {
         <span>{props.task.title}</span>
       </button>
 
-      <Show when={props.column === "running" && progress()?.detail}>
+      <Show when={props.column === "running" && (props.task.progress || progress()?.detail)}>
         {(detail) => (
           <div class="tasks-hub-live-step">
             <LoaderCircle class="tasks-hub-spin" aria-hidden="true" />
@@ -1038,7 +1053,7 @@ function KanbanTaskCard(props: {
         )}
       </Show>
 
-      <Show when={props.task.latestPreview}>
+      <Show when={props.task.error ?? props.task.queuedMessages[0]?.text}>
         {(preview) => <p class="tasks-hub-card-preview">{preview()}</p>}
       </Show>
 
@@ -1106,7 +1121,7 @@ function KanbanTaskCard(props: {
             value={replyText()}
             onInput={(event) => setReplyText(event.currentTarget.value)}
           />
-          <Button type="submit" variant="primary" size="xs">
+          <Button type="submit" variant="default" size="xs">
             Enviar
           </Button>
         </form>
@@ -1172,7 +1187,7 @@ function TasksKanbanBoard(props: {
             }
           >
             <For each={props.attentionEntries}>
-              {(entry) => <AttentionActionCard entry={entry()} pageProps={props.pageProps} />}
+              {(entry) => <AttentionActionCard entry={entry} pageProps={props.pageProps} />}
             </For>
           </Show>
         </div>
@@ -1192,13 +1207,13 @@ function TasksKanbanBoard(props: {
           >
             <For each={queuedMainChatAgents()}>
               {(agent) => {
-                const deliveries = () => props.pageProps.queues?.[agent().id]?.deliveries ?? [];
+                const deliveries = () => props.pageProps.queues?.[agent.id]?.deliveries ?? [];
                 return (
                   <div class="tasks-hub-card">
                     <div class="tasks-hub-card-top">
                       <span class="tasks-hub-agent-pill">
-                        <AgentAvatar agent={agent()} class="tasks-page-avatar" />
-                        <strong>{agent().name}</strong>
+                        <AgentAvatar agent={agent} class="tasks-page-avatar" />
+                        <strong>{agent.name}</strong>
                       </span>
                       <span class="tasks-hub-badge" data-tone="queued">
                         {deliveries().length} na fila do chat
@@ -1210,7 +1225,7 @@ function TasksKanbanBoard(props: {
                         type="button"
                         variant="ghost"
                         size="xs"
-                        onClick={() => props.pageProps.onSelectAgentChat?.(agent().id)}
+                        onClick={() => props.pageProps.onSelectAgentChat?.(agent.id)}
                       >
                         Abrir Chat
                       </Button>
@@ -1220,7 +1235,7 @@ function TasksKanbanBoard(props: {
               }}
             </For>
             <For each={queuedTasks()}>
-              {(task) => <KanbanTaskCard task={task()} pageProps={props.pageProps} column="queued" />}
+              {(task) => <KanbanTaskCard task={task} pageProps={props.pageProps} column="queued" />}
             </For>
           </Show>
         </div>
@@ -1240,13 +1255,13 @@ function TasksKanbanBoard(props: {
           >
             <For each={activeMainChatAgents()}>
               {(agent) => {
-                const prog = () => props.pageProps.turnProgress?.[agent().id];
+                const prog = () => props.pageProps.turnProgress?.[agent.id];
                 return (
                   <div class="tasks-hub-card tasks-hub-card-running">
                     <div class="tasks-hub-card-top">
                       <span class="tasks-hub-agent-pill">
-                        <AgentAvatar agent={agent()} class="tasks-page-avatar" />
-                        <strong>{agent().name}</strong>
+                        <AgentAvatar agent={agent} class="tasks-page-avatar" />
+                        <strong>{agent.name}</strong>
                       </span>
                       <span class="tasks-hub-badge" data-tone="working">
                         ⚡ Ativo no Chat
@@ -1261,7 +1276,7 @@ function TasksKanbanBoard(props: {
                         type="button"
                         variant="secondary"
                         size="xs"
-                        onClick={() => props.pageProps.onSelectAgentChat?.(agent().id)}
+                        onClick={() => props.pageProps.onSelectAgentChat?.(agent.id)}
                       >
                         Acompanhar no Chat
                       </Button>
@@ -1271,7 +1286,7 @@ function TasksKanbanBoard(props: {
               }}
             </For>
             <For each={runningTasks()}>
-              {(task) => <KanbanTaskCard task={task()} pageProps={props.pageProps} column="running" />}
+              {(task) => <KanbanTaskCard task={task} pageProps={props.pageProps} column="running" />}
             </For>
           </Show>
         </div>
@@ -1290,7 +1305,7 @@ function TasksKanbanBoard(props: {
             fallback={<div class="tasks-kanban-empty">Nenhuma entrega concluída ainda.</div>}
           >
             <For each={deliveredTasks()}>
-              {(task) => <KanbanTaskCard task={task()} pageProps={props.pageProps} column="delivered" />}
+              {(task) => <KanbanTaskCard task={task} pageProps={props.pageProps} column="delivered" />}
             </For>
           </Show>
         </div>
@@ -1425,8 +1440,8 @@ function TasksGanttTimeline(props: {
           <div class="tasks-gantt-track-header">
             <For each={ticks()}>
               {(tick) => (
-                <span class="tasks-gantt-tick" style={{ left: `${tick().pct}%` }}>
-                  {tick().label}
+                <span class="tasks-gantt-tick" style={{ left: `${tick.pct}%` }}>
+                  {tick.label}
                 </span>
               )}
             </For>
@@ -1449,16 +1464,16 @@ function TasksGanttTimeline(props: {
                   <button
                     type="button"
                     class="tasks-gantt-agent-btn"
-                    onClick={() => props.pageProps.onSelectAgentChat?.(group().agent.id)}
+                    onClick={() => props.pageProps.onSelectAgentChat?.(group.agent.id)}
                   >
-                    <AgentAvatar agent={group().agent} class="tasks-page-avatar" />
-                    <strong>{group().agent.name}</strong>
-                    <Show when={group().hasAttention}>
+                    <AgentAvatar agent={group.agent} class="tasks-page-avatar" />
+                    <strong>{group.agent.name}</strong>
+                    <Show when={group.hasAttention}>
                       <span class="tasks-hub-badge" data-tone="attention">
                         🚨 Depende de você
                       </span>
                     </Show>
-                    <Show when={group().isWorkingMain}>
+                    <Show when={group.isWorkingMain}>
                       <span class="tasks-hub-badge" data-tone="working">
                         ⚡ Em execução
                       </span>
@@ -1466,35 +1481,35 @@ function TasksGanttTimeline(props: {
                   </button>
                 </div>
 
-                <For each={group().tasks}>
+                <For each={group.tasks}>
                   {(task) => {
-                    const wait = () => props.pageProps.waitOf?.(task());
-                    const geom = () => barGeometry(task());
+                    const wait = () => props.pageProps.waitOf?.(task);
+                    const geom = () => barGeometry(task);
                     const tone = () =>
                       wait()
                         ? "attention"
-                        : task().state === "running"
+                        : task.state === "running"
                           ? "working"
-                          : task().state === "queued"
+                          : task.state === "queued"
                             ? "queued"
                             : "delivered";
                     return (
                       <div
                         class="tasks-gantt-row"
-                        data-selected={props.pageProps.selectedId === task().id ? "" : undefined}
+                        data-selected={props.pageProps.selectedId === task.id ? "" : undefined}
                       >
                         <button
                           type="button"
                           class="tasks-gantt-row-label"
-                          title={task().title}
+                          title={task.title}
                           onClick={() =>
                             props.pageProps.onSelect(
-                              props.pageProps.selectedId === task().id ? null : task().id,
+                              props.pageProps.selectedId === task.id ? null : task.id,
                             )
                           }
                         >
-                          <AgentTaskMark task={task()} decorative />
-                          <span class="tasks-gantt-row-title">{task().title}</span>
+                          <AgentTaskMark task={task} decorative />
+                          <span class="tasks-gantt-row-title">{task.title}</span>
                         </button>
                         <div class="tasks-gantt-track">
                           <button
@@ -1502,15 +1517,15 @@ function TasksGanttTimeline(props: {
                             class="tasks-gantt-bar"
                             data-tone={tone()}
                             style={{ left: geom().left, width: geom().width }}
-                            title={`${task().title} (${geom().durationLabel})${task().latestPreview ? ` — ${task().latestPreview}` : ""}`}
+                            title={`${task.title} (${geom().durationLabel})${task.progress ? ` — ${task.progress}` : ""}`}
                             onClick={() =>
                               props.pageProps.onSelect(
-                                props.pageProps.selectedId === task().id ? null : task().id,
+                                props.pageProps.selectedId === task.id ? null : task.id,
                               )
                             }
                           >
                             <span class="tasks-gantt-bar-text">
-                              {task().title} · {geom().durationLabel}
+                              {task.title} · {geom().durationLabel}
                             </span>
                           </button>
                         </div>
@@ -1558,7 +1573,7 @@ function TasksList(props: {
           </header>
           <div class="tasks-hub-urgent-grid">
             <For each={props.attentionEntries}>
-              {(entry) => <AttentionActionCard entry={entry()} pageProps={props.pageProps} />}
+              {(entry) => <AttentionActionCard entry={entry} pageProps={props.pageProps} />}
             </For>
           </div>
         </section>
@@ -1810,7 +1825,8 @@ export function TasksPage(props: TasksPageProps) {
       const agentName = agentOf(props.agents, task.agentId)?.name?.toLowerCase() ?? "";
       return (
         task.title.toLowerCase().includes(query) ||
-        (task.latestPreview?.toLowerCase().includes(query) ?? false) ||
+        (task.progress?.toLowerCase().includes(query) ?? false) ||
+        (task.error?.toLowerCase().includes(query) ?? false) ||
         agentName.includes(query)
       );
     });
@@ -1939,20 +1955,20 @@ export function TasksPage(props: TasksPageProps) {
               <For each={props.agents}>
                 {(agent) => {
                   const agentCount = () =>
-                    props.tasks.filter((t) => t.agentId === agent().id && t.state !== "closed").length +
-                    (props.activeTurns?.[agent().id] ? 1 : 0);
+                    props.tasks.filter((t) => t.agentId === agent.id && t.state !== "closed").length +
+                    (props.activeTurns?.[agent.id] ? 1 : 0);
                   return (
                     <Button
                       type="button"
-                      variant={filterAgentId() === agent().id ? "secondary" : "ghost"}
+                      variant={filterAgentId() === agent.id ? "secondary" : "ghost"}
                       size="xs"
                       class="tasks-hub-agent-filter-btn"
                       onClick={() =>
-                        setFilterAgentId(filterAgentId() === agent().id ? "" : agent().id)
+                        setFilterAgentId(filterAgentId() === agent.id ? "" : agent.id)
                       }
                     >
-                      <AgentAvatar agent={agent()} class="tasks-page-avatar" />
-                      <span>{agent().name}</span>
+                      <AgentAvatar agent={agent} class="tasks-page-avatar" />
+                      <span>{agent.name}</span>
                       <Show when={agentCount() > 0}>
                         <span class="tasks-hub-agent-count">{agentCount()}</span>
                       </Show>

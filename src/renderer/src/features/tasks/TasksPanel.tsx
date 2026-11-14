@@ -87,7 +87,7 @@ export function TasksPanel(props: TasksPanelProps) {
         selectAgent(agentId);
       }}
       onAnswerPrompt={async (agentId, threadId, requestId, answers) => {
-        const key = attentionKey(agentId, threadId);
+        const key = attentionKey(agentId, threadId ?? null);
         try {
           await window.openbot.agent.respondToPrompt({ requestId, answers }, props.serverId);
           setPendingPrompts((current) => ({ ...current, [key]: undefined }));
@@ -103,7 +103,7 @@ export function TasksPanel(props: TasksPanelProps) {
         }
       }}
       onRespondBrowserTakeover={async (agentId, threadId, requestId, decision) => {
-        const key = attentionKey(agentId, threadId);
+        const key = attentionKey(agentId, threadId ?? null);
         try {
           await window.openbot.agent.respondToBrowserTakeover({ requestId, decision }, props.serverId);
           setPendingPrompts((current) => ({ ...current, [key]: undefined }));

@@ -18,6 +18,6 @@ ssh -o BatchMode=yes "$VPS_HOST" "mkdir -p /opt/openbot/custom-build && docker e
 
 echo "==> 4. Enviando e aplicando build no container openbot ($VPS_HOST)..."
 scp -q /tmp/openbot-out.tar.gz "$VPS_HOST:/opt/openbot/custom-build/openbot-out.tar.gz"
-ssh -o BatchMode=yes "$VPS_HOST" "cd /opt/openbot/custom-build && tar -xzf openbot-out.tar.gz && /opt/openbot/auto-update.sh || (docker cp /opt/openbot/custom-build/out openbot:/tmp/custom-out && docker cp /opt/openbot/custom-build/scripts/update-asar-out.mjs openbot:/tmp/update-asar-out.mjs && docker exec -u root openbot node /tmp/update-asar-out.mjs /opt/OpenBot/app/resources/app.asar /tmp/custom-out /opt/OpenBot/app/resources/app.asar.unpacked && docker exec -u root openbot rm -rf /tmp/custom-out /tmp/update-asar-out.mjs && docker restart openbot)"
+ssh -o BatchMode=yes "$VPS_HOST" "cd /opt/openbot/custom-build && tar -xzf openbot-out.tar.gz && docker cp /opt/openbot/custom-build/out openbot:/tmp/custom-out && docker cp /opt/openbot/custom-build/scripts/update-asar-out.mjs openbot:/tmp/update-asar-out.mjs && docker exec -u root openbot node /tmp/update-asar-out.mjs /opt/OpenBot/app/resources/app.asar /tmp/custom-out /opt/OpenBot/app/resources/app.asar.unpacked && docker exec -u root openbot rm -rf /tmp/custom-out /tmp/update-asar-out.mjs && docker restart openbot"
 
 echo "==> Deploy concluído com sucesso em $VPS_HOST (zero perda de dados)!"

@@ -303,7 +303,7 @@ export class GitHubMcpProxy {
         Effect.gen({ self: this }, function* () {
           const error = failure.cause;
           if (isRefused(error)) yield* this.#options.refused(token);
-          if (!(error instanceof StreamableHTTPError && error.code >= 400)) return yield* failure;
+          if (!(error instanceof StreamableHTTPError && (error.code ?? 0) >= 400)) return yield* failure;
           yield* this.#drop(token, client);
           const replacement = yield* this.#upstream(token);
           return yield* githubCall(() => call(replacement));

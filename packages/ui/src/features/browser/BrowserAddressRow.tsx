@@ -349,7 +349,7 @@ export function BrowserAddressRow(props: {
       </form>
       <Show when={tab() && props.view.onToggleUserControl}>
         <Button
-          variant={tab()?.userControl ? "primary" : "secondary"}
+          variant={tab()?.userControl ? "default" : "secondary"}
           size="xs"
           class="browser-handoff-pill"
           data-user-control={tab()?.userControl ? "" : undefined}
