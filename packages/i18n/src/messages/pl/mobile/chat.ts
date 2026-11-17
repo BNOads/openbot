@@ -435,7 +435,8 @@ export const messages = {
   "mobile.chat.browserSecret.signInBlockedTitle": "Zaloguj się na swoim komputerze",
   "mobile.chat.browserSecret.signInBlockedBody":
     "Ta witryna nie akceptuje logowania z serwera. Otwórz ten czat w aplikacji OpenBot na komputer i zaloguj się tam.",
-  "mobile.chat.browserSecret.takeoverReload": "Potem odśwież stronę, zanim wybierzesz „Gotowe”.",
+  "mobile.chat.browserSecret.takeoverReload":
+    "OpenBot nie mógł dokończyć wpisywania hasła ani kodu. Wpisz na stronie to, czego brakuje. Potem odśwież stronę, zanim wybierzesz „Gotowe”.",
   "mobile.chat.browserSecret.takeoverFailed": "Nie udało się zrealizować żądania.",
   "mobile.chat.browserSecret.done": "Gotowe",
   "mobile.chat.browserSecret.submitOnce": "Wyślij jednorazowo do {origin}. Ta wartość nie trafi do czatu.",
@@ -628,6 +629,8 @@ export const messages = {
   "mobile.chat.queue.sendNowNext": "Zatrzymaj agenta i wyślij teraz następną wiadomość z kolejki",
   "mobile.chat.queue.deleteNext": "Usuń następną wiadomość w kolejce",
   "mobile.chat.queue.moveFirst": "Przenieś na początek",
+  "mobile.chat.queue.runInNewThread": "Uruchom w nowym wątku",
+  "mobile.chat.queue.runNextInNewThread": "Uruchom następną wiadomość z kolejki w nowym wątku",
   "mobile.chat.queue.deleteTitle": "Usunąć wiadomość z kolejki?",
   "mobile.chat.queue.deleteMessage": "Agent nigdy jej nie otrzyma.",
   "mobile.chat.queue.keep": "Zachowaj",

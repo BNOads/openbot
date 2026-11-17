@@ -10,9 +10,10 @@ import type {
   BrowserTarget,
 } from "@openbot/contracts/ipc";
 import { type DynamicRecord, isBoolean, isDynamicRecord, isNumber, isString } from "@openbot/contracts/runtime-values";
+import { BROWSER_VIEW_MAX_CLIPBOARD_TEXT } from "@openbot/contracts/team-protocol/browser-view-v1";
 import { sourceText } from "@openbot/i18n/source";
 import { redactText } from "@openbot/logging";
-import { Deferred, Effect, Exit, Fiber, Scope } from "effect";
+import { Deferred, Effect, Exit, Fiber, Option, Scope } from "effect";
 import type { NativeImage, WebContents } from "electron";
 import {
   BROWSER_CARD_FIELDS,
@@ -80,7 +81,13 @@ import {
   stringValue,
 } from "./browser-cdp-values";
 import { type DetectedChallenge, detectChallenge } from "./browser-challenge";
-import { type BrowserOperationError, browserCall, browserFailure, browserSync } from "./browser-effects";
+import {
+  type BrowserOperationError,
+  browserCall,
+  browserFailure,
+  browserSync,
+  secureInputFailure,
+} from "./browser-effects";
 import {
   type BrowserFillFieldsProgress,
   type BrowserPreparedField,
@@ -92,6 +99,7 @@ import { describeBrowserTarget, stopLoadingAndWait, waitForLoading } from "./bro
 import { guardedPress } from "./browser-press-guard";
 import { createFramePacer } from "./browser-screencast-pacing";
 import { probeSettle, SETTLE_BUSY_WAIT_MS, SETTLE_RESERVE_MS, waitForSettle } from "./browser-settle";
+import { CLICK_READ_TIMEOUT_MS, readClickTarget } from "./browser-user-click";
 import { BROWSER_VALUE_TOO_LARGE } from "./model-text-limit";
 import type { VaultCardSecret } from "./vault-items";
 
@@ -186,6 +194,8 @@ export interface BrowserScreencastOptions {
    * keeps that size.
    */
   viewport?: { width: number; height: number };
+  /** Hears the text that the page itself copies while the screencast runs. */
+  onPageCopy?: (text: string) => void;
 }
 
 export interface BrowserScreencastFrame {
@@ -382,6 +392,76 @@ const PASTE_EVENT_SCRIPT = `(text) => {${FOCUSED_SELECTION}
   return (active ?? doc.body).dispatchEvent(event);
 }`;
 
+/** A page copy that failed to arm, such as during a navigation, is armed again after this. */
+const PAGE_COPY_RETRY_MS = 500;
+/**
+ * Waits for the text that the page puts on the clipboard during a user action: its own "Copy"
+ * button writes the clipboard of the host, which a member watching from another computer cannot
+ * reach. It runs in the page's world, because only there are the page's clipboard calls, and it adds
+ * its hooks once a document. The original calls still run, unchanged. A copy wakes every wait, one
+ * for each view of the tab; a wait whose view ended is woken for nothing.
+ */
+const PAGE_COPY_SCRIPT = `(() => {
+  const key = Symbol.for("openbot.pageCopy");
+  let state = globalThis[key];
+  if (!state) {
+    state = { waits: [] };
+    Object.defineProperty(globalThis, key, { value: state });
+    const active = () => navigator.userActivation?.isActive === true;
+    const report = (text) => {
+      if (typeof text !== "string" || text.length === 0 || text.length > ${BROWSER_VIEW_MAX_CLIPBOARD_TEXT}) return;
+      const waits = state.waits;
+      state.waits = [];
+      for (const wake of waits) wake(text);
+    };
+    const proto = globalThis.Clipboard?.prototype;
+    const writeText = proto?.writeText;
+    if (writeText) proto.writeText = { writeText(text) { if (active()) report(String(text)); return writeText.apply(this, arguments); } }.writeText;
+    const write = proto?.write;
+    if (write) proto.write = { write(items) {
+      if (active()) Promise.resolve().then(async () => {
+        for (const item of items) if (item.types.includes("text/plain")) return report(await (await item.getType("text/plain")).text());
+      }).catch(() => {});
+      return write.apply(this, arguments);
+    } }.write;
+    // Capture: a copy library often stops the event at its own element. The text the page sets is
+    // read after the whole dispatch, when every handler has run.
+    addEventListener("copy", (event) => {
+      if (!event.isTrusted || !active()) return;
+      const selection = String(getSelection() ?? "");
+      const data = event.clipboardData;
+      let set = null;
+      if (data) {
+        const setData = data.setData;
+        data.setData = function (type, value) {
+          const kind = String(type).toLowerCase();
+          if (kind === "text" || kind === "text/plain") set = String(value);
+          return setData.apply(this, arguments);
+        };
+      }
+      setTimeout(() => report(event.defaultPrevented ? set : selection));
+    }, true);
+  }
+  return new Promise((resolve) => { state.waits.push(resolve); });
+})()`;
+
+/**
+ * The page's own copies, one at a time, for as long as the view runs. A wait ends with the document:
+ * the next one arms the page that loaded. It needs no CDP domain turned on, which a page could notice.
+ */
+function pageCopies(send: SendCommand, onPageCopy: (text: string) => void): Effect.Effect<never> {
+  return Effect.forever(
+    send("Runtime.evaluate", { expression: PAGE_COPY_SCRIPT, awaitPromise: true, returnByValue: true }).pipe(
+      Effect.flatMap((answer) => {
+        const text = answer.exceptionDetails === undefined ? recordValue(answer.result)?.value : undefined;
+        if (!isString(text)) return Effect.sleep(PAGE_COPY_RETRY_MS);
+        return Effect.sync(() => onPageCopy(text));
+      }),
+      Effect.catch(() => Effect.sleep(PAGE_COPY_RETRY_MS)),
+    ),
+  );
+}
+
 /** The letter of a shortcut. On a layout whose letters are not Latin, it is the key's place. */
 function shortcutLetter(key: string, code: string): string {
   if (/^[a-z]$/iu.test(key)) return key.toLowerCase();
@@ -433,6 +513,8 @@ export class BrowserCdpEngine {
   #viewButton: "left" | "middle" | "right" | null = null;
   /** Where the last mouse event put the pointer, so the next agent move starts there. */
   #pointer: { point: PointerPoint; sessionId: string | undefined } | null = null;
+  /** A live view's press while the page gets it, in the page's CSS pixels. */
+  #viewPress: PointerPoint | null = null;
   #targets = new Map<string, TargetRecord>();
   #lastSnapshot: BrowserSnapshot | null = null;
   #environment: BrowserEnvironment | null = null;
@@ -709,13 +791,17 @@ export class BrowserCdpEngine {
             }),
           );
         }).pipe(
-          Effect.catch(() =>
-            Effect.gen({ self: this }, function* () {
-              return yield* browserFailure(
-                new Error("Secure authentication could not be completed. Take over to check the page."),
-              );
-            }),
-          ),
+          Effect.catch((error) => {
+            // Keep a known reason, so the agent and the log learn why the fill stopped (#10536).
+            const reason = secureInputFailure(error);
+            return Effect.fail(
+              browserFailure(
+                new Error(
+                  `Secure authentication could not be completed.${reason ? ` ${reason}` : ""} Take over to check the page.`,
+                ),
+              ),
+            );
+          }),
         );
       });
     /**
@@ -2621,7 +2707,9 @@ export class BrowserCdpEngine {
                     });
                     live = true;
                     started();
-                    yield* Effect.raceFirst(Deferred.await(stopped), Deferred.await(detached));
+                    const ended = Effect.raceFirst(Deferred.await(stopped), Deferred.await(detached));
+                    const onPageCopy = options.onPageCopy;
+                    yield* onPageCopy ? Effect.raceFirst(ended, pageCopies(send, onPageCopy)) : ended;
                   }).pipe(
                     Effect.ensuring(
                       Effect.gen({ self: this }, function* () {
@@ -2762,6 +2850,7 @@ export class BrowserCdpEngine {
           this.#pointer = { point: { x: input.x, y: input.y }, sessionId: undefined };
           if (input.action === "down") this.#viewButton = input.button;
           if (input.action === "up") this.#viewButton = null;
+          if (input.action === "down") this.#viewPress = { x: input.x, y: input.y };
           yield* send("Input.dispatchMouseEvent", {
             type: input.action === "move" ? "mouseMoved" : input.action === "down" ? "mousePressed" : "mouseReleased",
             x: input.x,
@@ -2775,12 +2864,26 @@ export class BrowserCdpEngine {
                   : 0,
             clickCount: input.action === "move" ? 0 : input.clickCount,
             modifiers: input.modifiers,
-          });
+          }).pipe(
+            Effect.ensuring(
+              Effect.sync(() => {
+                this.#viewPress = null;
+              }),
+            ),
+          );
         }),
       // A paste or a cut works in the focused frame, which can be a frame in another process.
       input.type === "paste" || input.type === "cut",
     );
   });
+
+  /**
+   * The point of the live view's press that the page gets now, or null. A press of the live view in a
+   * frame of another process does not move `:hover` in the page, so the host reads the press here.
+   */
+  viewPress(): PointerPoint | null {
+    return this.#viewPress;
+  }
 
   /**
    * The text a member's copy takes from the page, or null when it is longer than `max`. It goes back
@@ -2804,6 +2907,26 @@ export class BrowserCdpEngine {
         return value === null ? null : stringValue(value);
       }),
     );
+  });
+
+  /**
+   * The role and the name of the control that a person pressed, or null. `readClickTarget` says what
+   * the point is. A page that does not answer in this time gives no click step.
+   */
+  readonly clickTargetAt = Effect.fn("BrowserCdp.clickTargetAt")(function* (
+    this: BrowserCdpEngine,
+    x: number,
+    y: number,
+    inPage: boolean,
+  ) {
+    const read = this.#leaseEffect((send) =>
+      readClickTarget(send, (frameId) => this.#targetSessions.get(frameId)?.sessionId, x, y, inPage),
+    );
+    const target = yield* read.pipe(
+      Effect.timeoutOption(CLICK_READ_TIMEOUT_MS),
+      Effect.catch(() => Effect.succeed(Option.none())),
+    );
+    return Option.getOrNull(target);
   });
 
   /**

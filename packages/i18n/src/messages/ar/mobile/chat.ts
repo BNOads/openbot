@@ -453,7 +453,8 @@ export const messages = {
   "mobile.chat.browserSecret.signInBlockedTitle": "سجّل الدخول على حاسوبك",
   "mobile.chat.browserSecret.signInBlockedBody":
     "لا يقبل هذا الموقع تسجيل الدخول من الخادم. افتح هذه المحادثة في تطبيق OpenBot لسطح المكتب على حاسوبك، وسجّل الدخول هناك.",
-  "mobile.chat.browserSecret.takeoverReload": "ثم أعد تحميل الصفحة قبل اختيار «انتهيت».",
+  "mobile.chat.browserSecret.takeoverReload":
+    "تعذّر على OpenBot إكمال إدخال كلمة المرور أو الرمز. أدخل ما ينقص في الصفحة. ثم أعد تحميل الصفحة قبل اختيار «انتهيت».",
   "mobile.chat.browserSecret.takeoverFailed": "تعذّر إكمال الطلب.",
   "mobile.chat.browserSecret.done": "انتهيت",
   "mobile.chat.browserSecret.submitOnce": "إرسال مرة واحدة إلى {origin}. لا تُضاف هذه القيمة إلى الدردشة.",
@@ -657,6 +658,8 @@ export const messages = {
   "mobile.chat.queue.sendNowNext": "أوقف الوكيل وأرسل الرسالة التالية في قائمة الانتظار الآن",
   "mobile.chat.queue.deleteNext": "حذف الرسالة التالية في قائمة الانتظار",
   "mobile.chat.queue.moveFirst": "نقل إلى الأول",
+  "mobile.chat.queue.runInNewThread": "تشغيل في سلسلة جديدة",
+  "mobile.chat.queue.runNextInNewThread": "تشغيل الرسالة التالية في قائمة الانتظار في سلسلة جديدة",
   "mobile.chat.queue.deleteTitle": "حذف الرسالة من قائمة الانتظار؟",
   "mobile.chat.queue.deleteMessage": "لن يستلمها الوكيل أبدًا.",
   "mobile.chat.queue.keep": "إبقاء",

@@ -368,7 +368,8 @@ export const messages = {
   "mobile.chat.browserSecret.signInBlockedTitle": "Accedi dal tuo computer",
   "mobile.chat.browserSecret.signInBlockedBody":
     "Questo sito non accetta un accesso dal server. Apri questa chat nell’app desktop di OpenBot sul tuo computer e accedi da lì.",
-  "mobile.chat.browserSecret.takeoverReload": "Poi ricarica la pagina prima di scegliere «Ho finito».",
+  "mobile.chat.browserSecret.takeoverReload":
+    "OpenBot non è riuscito a finire di inserire la password o il codice. Inserisci nella pagina ciò che manca. Poi ricarica la pagina prima di scegliere «Ho finito».",
   "mobile.chat.browserSecret.takeoverFailed": "Impossibile completare la richiesta.",
   "mobile.chat.browserSecret.done": "Ho finito",
   "mobile.chat.browserSecret.submitOnce":
@@ -537,6 +538,8 @@ export const messages = {
   "mobile.chat.queue.sendNowNext": "Ferma l’agente e invia ora il prossimo messaggio in coda",
   "mobile.chat.queue.deleteNext": "Elimina il prossimo messaggio in coda",
   "mobile.chat.queue.moveFirst": "Sposta al primo posto",
+  "mobile.chat.queue.runInNewThread": "Esegui in un nuovo thread",
+  "mobile.chat.queue.runNextInNewThread": "Esegui il prossimo messaggio in coda in un nuovo thread",
   "mobile.chat.queue.deleteTitle": "Eliminare il messaggio in coda?",
   "mobile.chat.queue.deleteMessage": "L'agente non lo riceverà mai.",
   "mobile.chat.queue.keep": "Mantieni",
