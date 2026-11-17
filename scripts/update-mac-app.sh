@@ -12,7 +12,7 @@ bun run build
 echo "==> 2. Gerando app.asar atualizado..."
 mkdir -p "$PROJECT_ROOT/dist"
 cat "$APP_PATH/Contents/Resources/app.asar" > "$PROJECT_ROOT/dist/app.asar"
-OUT_JSON="$(bun "$PROJECT_ROOT/scripts/update-asar-out.mjs" "$PROJECT_ROOT/dist/app.asar" "$PROJECT_ROOT/out" "$APP_PATH/Contents/Resources/app.asar.unpacked")"
+OUT_JSON="$(bun "$PROJECT_ROOT/scripts/update-asar-out.mjs" "$PROJECT_ROOT/dist/app.asar" "$PROJECT_ROOT/out" "$APP_PATH/Contents/Resources/app.asar.unpacked" "$PROJECT_ROOT/node_modules")"
 echo "$OUT_JSON"
 NEW_HASH="$(echo "$OUT_JSON" | sed -E 's/.*"headerSha256":"([^"]+)".*/\1/')"
 

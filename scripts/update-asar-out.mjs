@@ -1,17 +1,18 @@
 #!/usr/bin/env node
 import { createHash } from "node:crypto";
-import { copyFileSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 
-const [, , asarPathArg, outDirArg, unpackedDirArg] = process.argv;
+const [, , asarPathArg, outDirArg, unpackedDirArg, nodeModulesDirArg] = process.argv;
 if (!asarPathArg || !outDirArg) {
-  console.error("Usage: node update-asar-out.mjs <asarPath> <outDir> [unpackedDir]");
+  console.error("Usage: node update-asar-out.mjs <asarPath> <outDir> [unpackedDir] [nodeModulesDir]");
   process.exit(1);
 }
 
 const asarPath = resolve(asarPathArg);
 const outDir = resolve(outDirArg);
 const unpackedDir = unpackedDirArg ? resolve(unpackedDirArg) : null;
+const nodeModulesDir = nodeModulesDirArg && existsSync(resolve(nodeModulesDirArg)) ? resolve(nodeModulesDirArg) : null;
 
 const BLOCK_SIZE = 4 * 1024 * 1024;
 const UNPACKED_MAIN_FILES = new Set(["agent-database-host.js", "voice-speech-host.js", "voice-transcription-host.js"]);
@@ -57,13 +58,16 @@ const outRange = rangeOf(header.files.out);
 const pkgEntry = header.files["package.json"];
 const pkgStart = Number(pkgEntry.offset);
 let pkgBuf = origBuf.subarray(payloadStart + pkgStart, payloadStart + pkgStart + pkgEntry.size);
+let repoPkg = null;
 try {
   const repoPkgPath = resolve(outDir, "../package.json");
-  const repoPkg = JSON.parse(readFileSync(repoPkgPath, "utf8"));
-  const asarPkg = JSON.parse(pkgBuf.toString("utf8"));
-  if (repoPkg.version && asarPkg.version !== repoPkg.version) {
-    asarPkg.version = repoPkg.version;
-    pkgBuf = Buffer.from(`${JSON.stringify(asarPkg, null, 2)}\n`, "utf8");
+  if (existsSync(repoPkgPath)) {
+    repoPkg = JSON.parse(readFileSync(repoPkgPath, "utf8"));
+    const asarPkg = JSON.parse(pkgBuf.toString("utf8"));
+    if (repoPkg.version && asarPkg.version !== repoPkg.version) {
+      asarPkg.version = repoPkg.version;
+      pkgBuf = Buffer.from(`${JSON.stringify(asarPkg, null, 2)}\n`, "utf8");
+    }
   }
 } catch {
   // Keep original package.json buffer if repo package.json is not available
@@ -73,6 +77,35 @@ try {
 const prefixPayload = origBuf.subarray(payloadStart, payloadStart + outRange.min);
 let currentOffset = outRange.min;
 const outChunks = [];
+
+function packPlainDirTree(dirPath) {
+  const realDir = realpathSync(dirPath);
+  const entries = readdirSync(realDir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name));
+  const files = {};
+  for (const entry of entries) {
+    if (entry.name === ".DS_Store") continue;
+    const fullPath = join(realDir, entry.name);
+    let st;
+    try {
+      st = statSync(fullPath);
+    } catch {
+      continue;
+    }
+    if (st.isDirectory()) {
+      files[entry.name] = packPlainDirTree(fullPath);
+    } else if (st.isFile()) {
+      const fileBuf = readFileSync(fullPath);
+      files[entry.name] = {
+        size: fileBuf.length,
+        offset: String(currentOffset),
+        integrity: computeIntegrity(fileBuf),
+      };
+      outChunks.push(fileBuf);
+      currentOffset += fileBuf.length;
+    }
+  }
+  return { files };
+}
 
 function buildDirTree(dirPath, relFromOut = "") {
   const entries = readdirSync(dirPath, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name));
@@ -110,7 +143,113 @@ function buildDirTree(dirPath, relFromOut = "") {
   return { files };
 }
 
+function hasAsarNodeModule(pkgName) {
+  const nm = header.files.node_modules?.files;
+  if (!nm) return false;
+  if (pkgName.startsWith("@")) {
+    const [scope, name] = pkgName.split("/");
+    return Boolean(nm[scope]?.files?.[name]);
+  }
+  return Boolean(nm[pkgName]);
+}
+
+function addAsarNodeModule(pkgName, pkgDir) {
+  if (!header.files.node_modules) header.files.node_modules = { files: {} };
+  const nm = header.files.node_modules.files;
+  if (pkgName.startsWith("@")) {
+    const [scope, name] = pkgName.split("/");
+    if (!nm[scope]) nm[scope] = { files: {} };
+    nm[scope].files[name] = packPlainDirTree(pkgDir);
+  } else {
+    nm[pkgName] = packPlainDirTree(pkgDir);
+  }
+}
+
+function resolvePackageDir(pkgName, fromDir) {
+  const candidates = [];
+  if (fromDir) {
+    candidates.push(join(fromDir, "node_modules", pkgName));
+    try {
+      const realParent = dirname(realpathSync(fromDir));
+      candidates.push(join(realParent, pkgName));
+      candidates.push(join(dirname(realParent), pkgName));
+    } catch {}
+  }
+  if (nodeModulesDir) candidates.push(join(nodeModulesDir, pkgName));
+  return candidates.find((candidate) => existsSync(candidate)) ?? null;
+}
+
+function relocateTrailingNodes(node, keyName = "") {
+  if (!node || typeof node !== "object") return;
+  if (node.files) {
+    for (const [childKey, childVal] of Object.entries(node.files)) {
+      if (node === header && (childKey === "out" || childKey === "package.json")) continue;
+      relocateTrailingNodes(childVal, childKey);
+    }
+  } else if (node.offset !== undefined && !node.unpacked) {
+    const start = Number(node.offset);
+    if (start >= outRange.min) {
+      const slice = origBuf.subarray(payloadStart + start, payloadStart + start + node.size);
+      node.offset = String(currentOffset);
+      outChunks.push(slice);
+      currentOffset += slice.length;
+    }
+  }
+}
+
 header.files.out = buildDirTree(outDir);
+relocateTrailingNodes(header);
+
+// Inject any runtime npm packages missing from the base app.asar (e.g. packages added in newer upstream releases)
+if (nodeModulesDir) {
+  const addedPackages = [];
+  const visited = new Set();
+  const enqueuePackage = (pkgName, fromDir) => {
+    if (!pkgName || pkgName.startsWith("@openbot/") || visited.has(pkgName)) return;
+    visited.add(pkgName);
+    const pkgDir = resolvePackageDir(pkgName, fromDir);
+    if (!pkgDir) return;
+    if (!hasAsarNodeModule(pkgName)) {
+      addAsarNodeModule(pkgName, pkgDir);
+      addedPackages.push(pkgName);
+    }
+    try {
+      const depPkg = JSON.parse(readFileSync(join(pkgDir, "package.json"), "utf8"));
+      for (const sub of Object.keys(depPkg.dependencies || {})) {
+        enqueuePackage(sub, pkgDir);
+      }
+    } catch {}
+  };
+
+  if (repoPkg) {
+    for (const dep of Object.keys(repoPkg.dependencies || {})) {
+      enqueuePackage(dep, resolve(outDir, ".."));
+    }
+  } else {
+    // Staged directory mode (e.g. VPS deploy): inject every package present in nodeModulesDir that is missing in app.asar
+    for (const entry of readdirSync(nodeModulesDir, { withFileTypes: true })) {
+      if (entry.name.startsWith(".")) continue;
+      if (entry.name.startsWith("@")) {
+        const scopeDir = join(nodeModulesDir, entry.name);
+        for (const sub of readdirSync(scopeDir, { withFileTypes: true })) {
+          if (sub.name.startsWith(".")) continue;
+          const pkgName = `${entry.name}/${sub.name}`;
+          if (!hasAsarNodeModule(pkgName)) {
+            addAsarNodeModule(pkgName, join(scopeDir, sub.name));
+            addedPackages.push(pkgName);
+          }
+        }
+      } else if (!hasAsarNodeModule(entry.name)) {
+        addAsarNodeModule(entry.name, join(nodeModulesDir, entry.name));
+        addedPackages.push(entry.name);
+      }
+    }
+  }
+  if (addedPackages.length > 0) {
+    console.error("Added missing node_modules to app.asar:", addedPackages.join(", "));
+  }
+}
+
 header.files["package.json"] = {
   ...pkgEntry,
   size: pkgBuf.length,
