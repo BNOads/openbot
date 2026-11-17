@@ -45,6 +45,7 @@ import { QuestionPromptBubble } from "@openbot/ui/components/QuestionPromptBubbl
 import { SwapLabel, type SwapMotion } from "@openbot/ui/components/SwapLabel";
 import type { AgentProfile } from "@openbot/ui/data";
 import { AgentAvatar } from "@openbot/ui/features/agents/AgentAvatar";
+import { AgentSearchSelect, agentOf } from "@openbot/ui/features/agents/AgentSearchSelect";
 import { AgentTaskMark, type AgentTaskWait, agentTaskStatus } from "@openbot/ui/features/conversation/AgentTasks";
 import { ApprovalCard } from "@openbot/ui/features/conversation/ConversationPrompts";
 import {
@@ -65,22 +66,10 @@ import {
   voiceButtonLabel,
 } from "@openbot/ui/features/conversation/VoiceRecordingMorph";
 import { PageHeader, type PageHeaderFrame } from "@openbot/ui/features/window/PageHeader";
-import { ContentExitMotion } from "@openbot/ui/menu-motion";
 import { useText } from "@openbot/ui/text";
 import { prefersReducedMotion } from "@openbot/ui/utils";
 import type { JSX } from "@solidjs/web";
-import {
-  createEffect,
-  createMemo,
-  createSignal,
-  createStore,
-  createUniqueId,
-  For,
-  onCleanup,
-  onSettled,
-  Show,
-  untrack,
-} from "solid-js";
+import { createEffect, createStore, createUniqueId, For, onCleanup, onSettled, Show, untrack } from "solid-js";
 import { createComposerRowsResize } from "../conversation/createComposerRowsResize";
 import { TasksEmptyBoard, TasksEmptyPitch } from "./TasksEmpty";
 
@@ -535,7 +524,14 @@ function TasksComposer(props: TasksPageProps) {
         </div>
         <div class="composer-toolbar">
           <div class="tasks-page-composer-agent">
-            <TaskAgentSelect agents={props.agents} agentId={props.agentId} onChange={props.onAgentChange} />
+            <AgentSearchSelect
+              agents={props.agents}
+              agentId={props.agentId}
+              label={t("conversation.tasks.page.agent", {
+                name: agentOf(props.agents, props.agentId)?.name ?? props.agentId,
+              })}
+              onChange={props.onAgentChange}
+            />
           </div>
           <div class="composer-primary-actions">
             <Show when={props.voice} fallback={send()}>
@@ -552,6 +548,7 @@ function TasksComposer(props: TasksPageProps) {
                     elapsedSeconds={voice().elapsedSeconds}
                     onCancel={() => voice().onCancel()}
                     onFinish={() => voice().onFinish()}
+                    onSend={start}
                     send={send()}
                   >
                     <Button
@@ -591,10 +588,13 @@ function TaskTookLine(props: TasksPageProps & { took: TasksTook }) {
           </span>
         }
       >
-        <TaskAgentSelect
+        <AgentSearchSelect
           agents={props.agents}
           agentId={props.took.task.agentId}
-          title={props.took.task.title}
+          label={t("conversation.tasks.page.reassign", {
+            title: props.took.task.title,
+            name: agent()?.name ?? props.took.task.agentId,
+          })}
           onChange={props.onTookAgentChange}
         />
       </Show>

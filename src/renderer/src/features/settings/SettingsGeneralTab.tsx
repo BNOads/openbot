@@ -27,6 +27,7 @@ import { documentColorScheme } from "@openbot/ui/document-color-scheme";
 import { AppearanceSelect } from "@openbot/ui/features/settings/AppearanceSelect";
 import type { GeneralSettingsValue } from "@openbot/ui/features/settings/app-settings";
 import { ChatBackgroundSetting } from "@openbot/ui/features/settings/ChatBackgroundSetting";
+import { ChatBubbleStyleSelect } from "@openbot/ui/features/settings/ChatBubbleStyleSelect";
 import { OwnChatColorTrigger } from "@openbot/ui/features/settings/ChatColorSetting";
 import { FontSelect } from "@openbot/ui/features/settings/FontSelect";
 import { LanguageSelect } from "@openbot/ui/features/settings/LanguageSelect";
@@ -37,10 +38,12 @@ import { useText } from "@openbot/ui/text";
 import { createUniqueId, Show } from "solid-js";
 import { useInstalledFonts } from "../../app-fonts";
 import { useAppearanceChoice } from "../../appearance-choice";
+import { setChatBubbleStyle, useChatBubbleStyle } from "../../chat-bubble-style-preference";
 import { useI18n } from "../../i18n-context";
 import { useInterfaceSizeChoice } from "../../interface-size";
 import { useLayout } from "../../layout";
 import { useLogoColorChoice } from "../../logo-color";
+import { ChatBackdropSetting } from "./ChatBackdropSetting";
 import { ExternalLinkSelect } from "./ExternalLinkSelect";
 
 const interfaceSizeOptions = [...APP_INTERFACE_SIZES];
@@ -257,6 +260,7 @@ function AppearanceRows(props: SettingsGeneralTabProps) {
   const i18n = useI18n();
   const appearance = useAppearanceChoice();
   const logoColor = useLogoColorChoice();
+  const bubbleStyle = useChatBubbleStyle();
   const interfaceSize = useInterfaceSizeChoice();
   const installedFonts = useInstalledFonts();
   const interfaceFontTitleId = `settings-interface-font-${createUniqueId()}`;
@@ -316,6 +320,15 @@ function AppearanceRows(props: SettingsGeneralTabProps) {
               <OwnChatColorTrigger value={props.chatColor} onChange={saveChatColor} />
             </ItemActions>
           </Item>
+          <Item data-settings-row="settings.bubbleStyle.title" class="settings-modal-row">
+            <ItemContent>
+              <ItemTitle>{i18n.t("settings.bubbleStyle.title")}</ItemTitle>
+              <ItemDescription>{i18n.t("settings.bubbleStyle.description")}</ItemDescription>
+            </ItemContent>
+            <ItemActions>
+              <ChatBubbleStyleSelect value={bubbleStyle()} onChange={setChatBubbleStyle} mount={props.selectMount} />
+            </ItemActions>
+          </Item>
           <Item data-settings-row="settings.chatBackground.title" class="settings-modal-row">
             <ItemContent>
               <ItemTitle>{i18n.t("settings.chatBackground.title")}</ItemTitle>
@@ -332,6 +345,15 @@ function AppearanceRows(props: SettingsGeneralTabProps) {
                     : appearance.changeChatBackgroundDark(value)
                 }
               />
+            </ItemActions>
+          </Item>
+          <Item data-settings-row="settings.chatBackdrop.title" class="settings-modal-row">
+            <ItemContent>
+              <ItemTitle>{i18n.t("settings.chatBackdrop.title")}</ItemTitle>
+              <ItemDescription>{i18n.t("settings.chatBackdrop.description")}</ItemDescription>
+            </ItemContent>
+            <ItemActions>
+              <ChatBackdropSetting mount={props.selectMount} />
             </ItemActions>
           </Item>
         </ItemGroup>

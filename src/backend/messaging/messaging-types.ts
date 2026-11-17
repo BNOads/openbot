@@ -38,9 +38,14 @@ export interface InboundFile {
   mimeType: string;
   size: number;
   url: string;
+  /** A copy on this computer, when the connection saved the file at arrival (WhatsApp). */
+  path?: string;
 }
 
 /** One message that addresses OpenBot, in the same shape for every platform. */
+/** A message that stops the running request of its conversation instead of starting a new one. */
+export const CANCEL_TEXT = /^(cancel|stop)$/i;
+
 export interface InboundMessage {
   /** Stable for one message across redeliveries. */
   dedupKey: string;
@@ -127,6 +132,12 @@ export interface ContextEntry {
   files?: InboundFile[];
 }
 
+/** Keeps only the messages sent before `before` (an ISO time) whose text or author has each word of `query`. */
+export interface HistoryFilter {
+  query?: string;
+  before?: string;
+}
+
 /** What the history tool reads of a place. `note` says why the platform gave fewer messages, when it knows. */
 export interface RecentMessages {
   messages: ContextEntry[];
@@ -146,6 +157,8 @@ export class MessagingAdapterError extends Schema.TaggedError<MessagingAdapterEr
 
 export interface MessagingAdapter {
   readonly platform: MessagingPlatform;
+  /** True when `recent` applies its filter to all the messages that the platform keeps. */
+  readonly searchesHistory?: boolean;
   identify(): Effect.Effect<ConnectionIdentity, MessagingAdapterError>;
   post(target: MessageTarget, body: MessageBody): Effect.Effect<string, MessagingAdapterError>;
   edit(target: MessageTarget, messageId: string, body: MessageBody): Effect.Effect<void, MessagingAdapterError>;
@@ -204,12 +217,13 @@ export interface MessagingAdapter {
   /**
    * The newest messages of a place, oldest first, posts by bots included, for the agent's history
    * tool. With `threadKey`, only that conversation; with null, the whole channel or chat. At most
-   * `limit` messages; the platform can give fewer.
+   * `limit` messages; the platform can give fewer. A platform with `searchesHistory` applies `filter` to all that it saved; the others ignore it.
    */
   recent(
     platformChannelId: string,
     threadKey: string | null,
     limit: number,
+    filter?: HistoryFilter,
   ): Effect.Effect<RecentMessages, MessagingAdapterError>;
   /** Downloads one file to `destination`. Refuses a file larger than `maxBytes`. */
   download(file: InboundFile, destination: string, maxBytes: number): Effect.Effect<void, MessagingAdapterError>;

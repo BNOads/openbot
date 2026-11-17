@@ -3,7 +3,7 @@ import { EventEmitter } from "node:events";
 import { constants, existsSync } from "node:fs";
 import { access, appendFile, mkdir, readdir, readFile, rename, rm, stat } from "node:fs/promises";
 import { homedir } from "node:os";
-import { basename, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import type {
   IdleRestart,
   ScheduledUpdateRestart,
@@ -14,10 +14,11 @@ import type {
 import { isUpdateBusyPhase } from "@openbot/contracts/ipc";
 import { sourceText } from "@openbot/i18n/source";
 import { createOpenBotLogger, toLogValue } from "@openbot/logging";
-import { Cause, Deferred, Effect, Result, Schema, Scope, Semaphore } from "effect";
+import { Cause, Deferred, Effect, Fiber, Result, Schema, Scope, Semaphore } from "effect";
 import type { ProgressInfo, UpdateInfo } from "electron-updater";
 import type { HostUpdateState } from "../../packages/contracts/src/host-manager";
 import { causeHelpers } from "../backend/effect-boundary";
+import { writeUpdateHandover } from "./update-install-guard";
 import type { OpenBotSiblingInstance, SiblingScanFailed } from "./update-sibling-instances";
 
 const logger = createOpenBotLogger("update");
@@ -178,8 +179,12 @@ interface UpdateServiceOptions {
   platform?: NodeJS.Platform;
   /** macOS: the application bundle that Squirrel.Mac replaces. */
   appBundlePath?: string | undefined;
+  /** Linux: the AppImage file that electron-updater replaces (`APPIMAGE`). */
+  appImagePath?: string | undefined;
   logDirectory?: string;
   shipItDirectory?: string | undefined;
+  /** macOS: the record that keeps a launch during the install from cancelling it (`update-install-guard.ts`). */
+  handoverPath?: string | undefined;
   /** electron-updater's cache directory, named by `updaterCacheDirName` in `app-update.yml`. */
   updaterCacheDirectory?: string | undefined;
   initialCheckDelayMs?: number;
@@ -266,9 +271,11 @@ export class UpdateService extends EventEmitter<UpdateServiceEvents> {
     Pick<
       UpdateServiceOptions,
       | "appBundlePath"
+      | "appImagePath"
       | "beforeInstall"
       | "checkSiblingInstances"
       | "currentUid"
+      | "handoverPath"
       | "logDirectory"
       | "shipItDirectory"
       | "updaterCacheDirectory"
@@ -287,6 +294,7 @@ export class UpdateService extends EventEmitter<UpdateServiceEvents> {
   #operation: UpdateOperation = "check";
   #history: UpdateDiagnosticEvent[] = [];
   readonly #logLock = Semaphore.makeUnsafe(1);
+  readonly #logWrites = new Set<Fiber.Fiber<void, UpdateOperationFailure>>();
   readonly #workScope = Scope.makeUnsafe();
   #autoDownload: boolean;
   #downloadedVersion: string | null = null;
@@ -338,9 +346,21 @@ export class UpdateService extends EventEmitter<UpdateServiceEvents> {
     };
     this.on("diagnostic", (event) => {
       const directory = this.#options.logDirectory;
-      if (directory) this.#fork(this.#logLock.withPermit(appendUpdateLog(directory, event)));
+      if (!directory) return;
+      // `appendUpdateLog` catches every failure, so this write needs no failure log of `#fork`.
+      const write = Effect.runFork(this.#logLock.withPermit(appendUpdateLog(directory, event)));
+      this.#logWrites.add(write);
+      write.addObserver(() => this.#logWrites.delete(write));
     });
     this.#recordStatus();
+  }
+
+  /**
+   * Waits for the `update.log` events that were recorded before this call. The file write is
+   * asynchronous, so an `app.exit` right after a failed install lost its `install_failed` (#5039).
+   */
+  flushLog(): Effect.Effect<void> {
+    return Effect.suspend(() => Fiber.awaitAll([...this.#logWrites])).pipe(Effect.asVoid);
   }
 
   start(scheduleChecks = true): void {
@@ -699,6 +719,16 @@ export class UpdateService extends EventEmitter<UpdateServiceEvents> {
         logger.warn("OpenBot update install refused: the application runs from a read-only volume.");
         return yield* new UpdateOperationFailure({ cause: new Error(sourceText("error.update.readOnlyLocation")) });
       }
+      const appImage = this.#options.platform === "linux" ? this.#options.appImagePath : undefined;
+      const appImageProblem = appImage ? yield* findAppImageInstallProblem(appImage) : null;
+      if (appImageProblem === "missing") {
+        logger.warn("OpenBot update install refused: the AppImage file is missing.");
+        return yield* new UpdateOperationFailure({ cause: new Error(sourceText("error.update.appImageMissing")) });
+      }
+      if (appImageProblem === "readOnly") {
+        logger.warn("OpenBot update install refused: the AppImage folder is not writable.");
+        return yield* new UpdateOperationFailure({ cause: new Error(sourceText("error.update.appImageReadOnly")) });
+      }
       if (this.#managedByHost) return yield* new UpdateOperationFailure({ cause: new Error(MANAGED_HOST_MESSAGE) });
       if (!this.#canInstall() || this.#installStarted)
         return yield* new UpdateOperationFailure({ cause: new Error(sourceText("error.update.notReady")) });
@@ -716,10 +746,17 @@ export class UpdateService extends EventEmitter<UpdateServiceEvents> {
           if (this.#checkRequest) yield* Deferred.await(this.#checkRequest).pipe(Effect.catch(() => Effect.void));
           if (this.#installGeneration !== generation) return;
           this.#installHandedOver = true;
-          // Silent, so the assisted Windows installer shows no page and opens the app again: it ignores
-          // the force-run flag in a visible run. Other updaters only relaunch, now from `true` and not
-          // from `autoRunAppAfterInstall`, which is also `true`.
-          yield* updateSync(() => this.#updater.quitAndInstall(true, true));
+          if (this.#options.platform === "darwin" && this.#options.handoverPath) {
+            yield* writeUpdateHandover(this.#options.handoverPath, this.#options.currentVersion, Date.now()).pipe(
+              Effect.catch((error) =>
+                Effect.sync(() => logger.warn("The update handover record was not saved.", toLogValue(error))),
+              ),
+            );
+          }
+          // Visible, so the Windows installer shows its progress until the new version opens. In an
+          // update it shows only that page and opens the app again (`customFinishPage` in
+          // `build/installer.nsh`). Other updaters only relaunch, from `autoRunAppAfterInstall`.
+          yield* updateSync(() => this.#updater.quitAndInstall(false, true));
           this.#armPhaseTimer();
         }),
       );
@@ -1062,6 +1099,33 @@ function isOnReadOnlyVolume(bundlePath: string): Effect.Effect<boolean> {
       Effect.succeed(typeof cause === "object" && cause !== null && "code" in cause && cause.code === "EROFS"),
     ),
   );
+}
+
+/**
+ * electron-updater deletes the AppImage file that `APPIMAGE` names and moves the download into its
+ * folder. It finds a problem with either only inside `quitAndInstall`, after shutdown preparation, so
+ * the app quit with no message (#9779): a file that was moved, renamed or replaced while OpenBot ran,
+ * or a folder that this user cannot write to. Checked first, the app stays open.
+ */
+function findAppImageInstallProblem(appImagePath: string): Effect.Effect<"missing" | "readOnly" | null> {
+  return Effect.gen(function* () {
+    const missing = yield* updateIO(() => stat(appImagePath)).pipe(
+      Effect.as(false),
+      Effect.catch(({ cause }) => Effect.succeed(isMissingPathError(cause))),
+    );
+    if (missing) return "missing";
+    const writable = yield* updateIO(() => access(dirname(appImagePath), constants.W_OK)).pipe(
+      Effect.as(true),
+      Effect.catch(() => Effect.succeed(false)),
+    );
+    return writable ? null : "readOnly";
+  });
+}
+
+/** A path that does not exist, or that has a file where a folder must be. */
+function isMissingPathError(cause: unknown): boolean {
+  const code = typeof cause === "object" && cause !== null && "code" in cause ? cause.code : undefined;
+  return code === "ENOENT" || code === "ENOTDIR";
 }
 
 function errorMessage(code: UpdateFailureCode) {
