@@ -471,7 +471,7 @@ function shortcutLetter(key: string, code: string): string {
 /** Ctrl or Meta: either one is the command modifier, whichever system the client runs. */
 const COMMAND_MODIFIERS = 2 | 4;
 
-type BrowserDialogType = "alert" | "confirm";
+type BrowserDialogType = "alert" | "confirm" | "prompt";
 
 /** A JavaScript dialog that is open in the tab. `agent` is true when the agent can answer it with `handle_dialog`. */
 export interface BrowserDialog {
@@ -1015,7 +1015,7 @@ export class BrowserCdpEngine {
   /** Agent actions that run now. A dialog that opens while one runs is the agent's to answer. */
   readonly #dialogWatches = new Set<DialogWatch>();
   /** The open dialog. Tracked only while this engine owns the debugger and has `Page` enabled. */
-  #dialog: (BrowserDialog & { owner: BrowserDialogOwner | undefined }) | undefined;
+  #dialog: (BrowserDialog & { owner: BrowserDialogOwner | undefined; sessionId?: string | undefined; defaultPrompt?: string | undefined }) | undefined;
   #dialogChanged = Deferred.makeUnsafe<void>();
   #pageEnabled = false;
   /** CDP reported a dialog, and Electron did not show its box yet. */
@@ -1073,9 +1073,8 @@ export class BrowserCdpEngine {
           this.#targetSessions.set(targetId, { sessionId: attachedSessionId, url: stringValue(targetInfo?.url) });
         }
       }
-      // Child sessions do not enable `Page`. A dialog of a frame in another process stays with a person.
-      if (method === "Page.javascriptDialogOpening" && !sessionId && isRecord(params)) this.#dialogOpened(params);
-      if (method === "Page.javascriptDialogClosed" && !sessionId) this.#dialogClosed();
+      if (method === "Page.javascriptDialogOpening" && isRecord(params)) this.#dialogOpened(params, sessionId);
+      if (method === "Page.javascriptDialogClosed") this.#dialogClosed();
       if (method === "Target.detachedFromTarget" && isRecord(params)) {
         this.#forgetTargetSession(stringValue(params.sessionId));
       }
@@ -1288,7 +1287,16 @@ export class BrowserCdpEngine {
     yield* this.#leaseEffect((send) =>
       Effect.gen({ self: this }, function* () {
         const resolved = yield* this.#resolveTargetEffect(send, target, deadline);
-        if (!resolved.backendNodeId) return yield* browserFailure(new Error("Typing requires an element target."));
+        if (!resolved.backendNodeId) {
+          yield* browserSync(() => assertBeforeDeadline(deadline));
+          onDispatch?.();
+          const from = this.#pointerIn(undefined);
+          this.#pointer = { point: { x: resolved.x, y: resolved.y }, sessionId: undefined };
+          yield* dispatchMouseClick(send, { x: resolved.x, y: resolved.y }, "left", 1, 0, undefined, from);
+          yield* waitForFrame(send, undefined, deadline, DROP_FRAME_SCRIPT);
+          yield* this.#typeFocusedWithSend(send, text, options.submit === true, deadline, onDispatch);
+          return;
+        }
         const chain = yield* this.#focusChain(send, resolved.backendNodeId, resolved.sessionId);
         // Native input goes to whatever holds focus, and a page focus or input handler can move it.
         // A frame in another process can keep its own active element after the page takes focus, so
@@ -1568,28 +1576,43 @@ export class BrowserCdpEngine {
     deadline?: number,
     onDispatch?: ActionDispatch,
   ): Effect.fn.Return<void, BrowserOperationError> {
-    const characters = [...text.replace(/\r\n?/g, "\n")];
     yield* this.#leaseEffect((send) =>
       Effect.gen({ self: this }, function* () {
-        yield* browserSync(() => assertBeforeDeadline(deadline));
-        onDispatch?.();
-        let sent = 0;
-        for (const character of characters) {
-          // Each keystroke is its own event, so a deadline reached part way through leaves what the
-          // page already took. Reporting only that the action timed out would let a caller repeat a
-          // send that half happened, which in a spreadsheet writes the data twice.
-          yield* browserSync(() => assertTypingProgressBeforeDeadline(deadline, sent, characters.length));
-          if (character === "\n") yield* dispatchShortcut(send, "Enter");
-          else if (character === "\t") yield* dispatchShortcut(send, "Tab");
-          else yield* dispatchTextKey(send, character);
-          sent += 1;
-        }
-        if (submit) {
-          yield* browserSync(() => assertTypingProgressBeforeDeadline(deadline, sent, characters.length));
-          yield* dispatchShortcut(send, "Enter");
-        }
+        yield* this.#typeFocusedWithSend(send, text, submit, deadline, onDispatch);
       }),
     );
+  });
+
+  readonly #typeFocusedWithSend = Effect.fn("BrowserCdp.typeFocusedWithSend")(function* (
+    this: BrowserCdpEngine,
+    send: SendCommand,
+    text: string,
+    submit: boolean,
+    deadline?: number,
+    onDispatch?: ActionDispatch,
+  ): Effect.fn.Return<void, BrowserOperationError> {
+    const characters = [...text.replace(/\r\n?/g, "\n")];
+    const focused = yield* this.#focusedWorld(send).pipe(
+      Effect.catch(() => Effect.succeed<{ contextId?: number; sessionId?: string }>({})),
+    );
+    const sessionId = focused.sessionId;
+    yield* browserSync(() => assertBeforeDeadline(deadline));
+    onDispatch?.();
+    let sent = 0;
+    for (const character of characters) {
+      // Each keystroke is its own event, so a deadline reached part way through leaves what the
+      // page already took. Reporting only that the action timed out would let a caller repeat a
+      // send that half happened, which in a spreadsheet writes the data twice.
+      yield* browserSync(() => assertTypingProgressBeforeDeadline(deadline, sent, characters.length));
+      if (character === "\n") yield* dispatchShortcut(send, "Enter", sessionId);
+      else if (character === "\t") yield* dispatchShortcut(send, "Tab", sessionId);
+      else yield* dispatchTextKey(send, character, sessionId);
+      sent += 1;
+    }
+    if (submit) {
+      yield* browserSync(() => assertTypingProgressBeforeDeadline(deadline, sent, characters.length));
+      yield* dispatchShortcut(send, "Enter", sessionId);
+    }
   });
 
   readonly press = Effect.fn("BrowserCdp.press")(function* (
@@ -2089,8 +2112,14 @@ export class BrowserCdpEngine {
   ): Effect.fn.Return<BrowserUploadAssignment, BrowserOperationError> {
     return yield* this.#leaseEffect((send) =>
       Effect.gen({ self: this }, function* () {
-        const resolved = yield* this.#resolveElementEffect(send, target);
-        return yield* this.#identifyUploadTargetEffect(send, resolved);
+        const resolved = yield* this.#resolveUploadNodeOrPointEffect(send, target);
+        if (resolved.backendNodeId === undefined) {
+          return yield* this.#identifyRootUploadDocumentEffect(send);
+        }
+        return yield* this.#identifyUploadTargetEffect(send, {
+          backendNodeId: resolved.backendNodeId,
+          ...(resolved.sessionId === undefined ? {} : { sessionId: resolved.sessionId }),
+        });
       }),
     );
   });
@@ -2114,32 +2143,120 @@ export class BrowserCdpEngine {
     }
     return yield* this.#leaseEffect((send) =>
       Effect.gen({ self: this }, function* () {
-        const resolved = yield* this.#resolveElementEffect(send, target, deadline);
-        const assignment = yield* this.#identifyUploadTargetEffect(send, resolved);
+        const resolved = yield* this.#resolveUploadNodeOrPointEffect(send, target, deadline);
+        const assignment =
+          resolved.backendNodeId !== undefined
+            ? yield* this.#identifyUploadTargetEffect(send, {
+                backendNodeId: resolved.backendNodeId,
+                ...(resolved.sessionId === undefined ? {} : { sessionId: resolved.sessionId }),
+              })
+            : yield* this.#identifyRootUploadDocumentEffect(send);
         onTargetResolved?.(assignment);
-        const isFileInput = yield* this.#callOnNode(
-          send,
-          resolved.backendNodeId,
-          // `instanceof` fails for an input in a same-process iframe, which has its own `HTMLInputElement`.
-          "function() { return this.localName === 'input' && this.type === 'file'; }",
-          [],
-          resolved.sessionId,
-        );
-        yield* browserSync(() => assertBeforeDeadline(deadline));
-        if (isFileInput !== true) {
-          yield* this.#uploadThroughChooserEffect(send, resolved, paths, deadline, onDispatch);
+        if (resolved.backendNodeId === undefined) {
+          yield* this.#uploadPointThroughChooserEffect(
+            send,
+            { x: resolved.x, y: resolved.y, ...(resolved.sessionId === undefined ? {} : { sessionId: resolved.sessionId }) },
+            paths,
+            deadline,
+            onDispatch,
+          );
           return assignment;
         }
-        onDispatch?.();
-        yield* this.#clearFileInputEffect(send, resolved.backendNodeId, resolved.sessionId);
-        yield* send(
-          "DOM.setFileInputFiles",
-          { backendNodeId: resolved.backendNodeId, files: paths },
-          resolved.sessionId,
-        );
+        const elementRef = {
+          backendNodeId: resolved.backendNodeId,
+          ...(resolved.sessionId === undefined ? {} : { sessionId: resolved.sessionId }),
+        };
+        const directFileInputId = yield* this.#findNestedOrControlFileInputEffect(send, elementRef);
+        yield* browserSync(() => assertBeforeDeadline(deadline));
+        if (directFileInputId !== null) {
+          onDispatch?.();
+          yield* this.#clearFileInputEffect(send, directFileInputId, resolved.sessionId);
+          yield* send(
+            "DOM.setFileInputFiles",
+            { backendNodeId: directFileInputId, files: paths },
+            resolved.sessionId,
+          );
+          return assignment;
+        }
+        yield* this.#uploadThroughChooserEffect(send, elementRef, paths, deadline, onDispatch);
         return assignment;
       }),
     );
+  });
+
+  readonly #resolveUploadNodeOrPointEffect = Effect.fn("BrowserCdp.resolveUploadNodeOrPoint")(function* (
+    this: BrowserCdpEngine,
+    send: SendCommand,
+    target: BrowserTarget,
+    deadline?: number,
+  ): Effect.fn.Return<
+    { backendNodeId?: number; sessionId?: string | undefined; x: number; y: number },
+    BrowserOperationError
+  > {
+    const resolved = yield* this.#resolveTargetEffect(send, target, deadline);
+    if (resolved.backendNodeId !== undefined) return resolved;
+    // Point target: try mapping coordinates to the underlying DOM node so direct <input type="file">
+    // or <label> dropzones work immediately, while still falling back to chooser click at (x, y).
+    const metrics = yield* send("Page.getLayoutMetrics").pipe(Effect.catch(() => Effect.succeed<CdpResult>({})));
+    const viewport = recordValue(metrics.cssLayoutViewport);
+    const hit = yield* send("DOM.getNodeForLocation", {
+      x: Math.round(resolved.x + numberValue(viewport?.pageX)),
+      y: Math.round(resolved.y + numberValue(viewport?.pageY)),
+      includeUserAgentShadowDOM: true,
+    }).pipe(Effect.catch(() => Effect.succeed<CdpResult>({})));
+    const hitId = numberValue(hit.backendNodeId);
+    return hitId ? { backendNodeId: hitId, x: resolved.x, y: resolved.y } : resolved;
+  });
+
+  readonly #findNestedOrControlFileInputEffect = Effect.fn("BrowserCdp.findNestedOrControlFileInput")(function* (
+    this: BrowserCdpEngine,
+    send: SendCommand,
+    resolved: { backendNodeId: number; sessionId?: string | undefined },
+  ): Effect.fn.Return<number | null, BrowserOperationError> {
+    const executionContextId =
+      (yield* this.#nodeFrameContextId(send, resolved.backendNodeId, resolved.sessionId).pipe(
+        Effect.catch(() => Effect.succeed(undefined)),
+      )) ?? (yield* automationContextId(send, resolved.sessionId));
+    const obj = yield* send(
+      "DOM.resolveNode",
+      { backendNodeId: resolved.backendNodeId, executionContextId },
+      resolved.sessionId,
+    ).pipe(Effect.catch(() => Effect.succeed<CdpResult>({})));
+    const objectId = stringValue(recordValue(obj.object)?.objectId);
+    if (!objectId) return null;
+    return yield* Effect.gen({ self: this }, function* () {
+      const targetNodeRes = yield* send(
+        "Runtime.callFunctionOn",
+        {
+          objectId,
+          functionDeclaration: `function() {
+            if (this.localName === 'input' && this.type === 'file') return this;
+            if (this.localName === 'label' && this.control?.localName === 'input' && this.control.type === 'file') return this.control;
+            const inputs = this.querySelectorAll ? [...this.querySelectorAll('input[type="file"]')] : [];
+            if (inputs.length === 1) return inputs[0];
+            return null;
+          }`,
+          returnByValue: false,
+        },
+        resolved.sessionId,
+      ).pipe(Effect.catch(() => Effect.succeed<CdpResult>({})));
+      const fileObjectId = stringValue(recordValue(targetNodeRes.result)?.objectId);
+      if (!fileObjectId) return null;
+      return yield* Effect.gen(function* () {
+        const described = yield* send("DOM.describeNode", { objectId: fileObjectId, depth: 0 }, resolved.sessionId);
+        return numberValue(recordValue(described.node)?.backendNodeId) || null;
+      }).pipe(Effect.ensuring(send("Runtime.releaseObject", { objectId: fileObjectId }, resolved.sessionId).pipe(Effect.ignore)));
+    }).pipe(Effect.ensuring(send("Runtime.releaseObject", { objectId }, resolved.sessionId).pipe(Effect.ignore)));
+  });
+
+  readonly #identifyRootUploadDocumentEffect = Effect.fn("BrowserCdp.identifyRootUploadDocument")(function* (
+    this: BrowserCdpEngine,
+    send: SendCommand,
+  ): Effect.fn.Return<BrowserUploadAssignment, BrowserOperationError> {
+    const doc = yield* send("DOM.getDocument", { depth: 0 });
+    const backendNodeId = numberValue(recordValue(doc.root)?.backendNodeId);
+    if (!backendNodeId) return yield* browserFailure(new Error("Unable to identify the upload document."));
+    return yield* this.#identifyUploadTargetEffect(send, { backendNodeId });
   });
 
   /**
@@ -2155,16 +2272,28 @@ export class BrowserCdpEngine {
     deadline?: number,
     onDispatch?: ActionDispatch,
   ): Effect.fn.Return<void, BrowserOperationError> {
-    const { sessionId, ...point } = yield* this.#elementPointEffect(
+    // Allow clicking through decorative overlays (<p>, <div>, <iframe> children) inside upload dropzones.
+    const point = yield* this.#elementPointEffect(
       send,
       resolved.backendNodeId,
-      true,
+      false,
       resolved.sessionId,
     );
+    yield* this.#uploadPointThroughChooserEffect(send, point, paths, deadline, onDispatch);
+  });
+
+  readonly #uploadPointThroughChooserEffect = Effect.fn("BrowserCdp.uploadPointThroughChooser")(function* (
+    this: BrowserCdpEngine,
+    send: SendCommand,
+    point: { x: number; y: number; sessionId?: string | undefined },
+    paths: string[],
+    deadline?: number,
+    onDispatch?: ActionDispatch,
+  ): Effect.fn.Return<void, BrowserOperationError> {
+    const { sessionId, ...coordinates } = point;
     // Interception needs the Page domain, and turning it off again on the root session would also end
     // the live view's screencast. The root frame's chooser is intercepted on a session of its own.
     const attachOwnSession = Effect.gen(function* () {
-      if (sessionId !== undefined) return undefined;
       const info = yield* send("Target.getTargetInfo");
       const targetId = stringValue(recordValue(info.targetInfo)?.targetId);
       const attached = yield* send("Target.attachToTarget", { targetId, flatten: true });
@@ -2172,19 +2301,30 @@ export class BrowserCdpEngine {
       if (!ownSessionId) return yield* browserFailure(new Error("Unable to intercept the file chooser."));
       return ownSessionId;
     });
+    const childSessions = [...this.#targetSessions.values()].map((t) => t.sessionId);
+    const knownSessions = new Set<string | undefined>([undefined, sessionId, ...childSessions]);
     yield* Effect.acquireUseRelease(
       attachOwnSession,
       (ownSessionId) =>
         Effect.gen({ self: this }, function* () {
-          const chooserSessionId = ownSessionId ?? sessionId;
-          const chooser = Deferred.makeUnsafe<DynamicRecord | null>();
+          knownSessions.add(ownSessionId);
+          const interceptSessions = [...new Set([ownSessionId, ...(sessionId ? [sessionId] : []), ...childSessions])];
+          const chooser = Deferred.makeUnsafe<{ params: DynamicRecord; eventSessionId?: string } | null>();
           const stopWaitingForChooser = yield* browserSync(() => {
             let stopWaitingForChooser = () => undefined;
             const debuggerClient = this.#contents.debugger;
             const listener = (_event: Electron.Event, method: string, params: unknown, messageSessionId?: string) => {
-              if (method !== "Page.fileChooserOpened" || messageSessionId !== chooserSessionId) return;
+              if (method !== "Page.fileChooserOpened" || !knownSessions.has(messageSessionId)) return;
+              const rec = recordValue(params);
+              if (!rec) return;
               stopWaitingForChooser();
-              Deferred.doneUnsafe(chooser, Effect.succeed(recordValue(params) ?? null));
+              Deferred.doneUnsafe(
+                chooser,
+                Effect.succeed({
+                  params: rec,
+                  ...(messageSessionId === undefined ? {} : { eventSessionId: messageSessionId }),
+                }),
+              );
             };
             const timeout = setTimeout(
               () => {
@@ -2202,33 +2342,36 @@ export class BrowserCdpEngine {
             return stopWaitingForChooser;
           });
           yield* Effect.gen({ self: this }, function* () {
-            yield* send("Page.enable", {}, chooserSessionId);
-            yield* send("Page.setInterceptFileChooserDialog", { enabled: true }, chooserSessionId);
+            for (const targetSessionId of interceptSessions) {
+              yield* send("Page.enable", {}, targetSessionId).pipe(Effect.ignore);
+              yield* send("Page.setInterceptFileChooserDialog", { enabled: true }, targetSessionId).pipe(Effect.ignore);
+            }
             yield* browserSync(() => assertBeforeDeadline(deadline));
             onDispatch?.();
-            yield* dispatchMouseClick(send, point, "left", 1, 0, sessionId);
+            yield* dispatchMouseClick(send, coordinates, "left", 1, 0, sessionId);
             const opened = yield* Deferred.await(chooser);
             if (!opened) {
               return yield* browserFailure(
                 new Error("The target was clicked but did not open a file chooser. Take a fresh snapshot."),
               );
             }
-            const backendNodeId = numberValue(opened.backendNodeId);
+            const backendNodeId = numberValue(opened.params.backendNodeId);
             if (!backendNodeId) return yield* browserFailure(new Error("The file chooser has no file input."));
-            if (opened.mode === "selectSingle" && paths.length > 1)
+            if (opened.params.mode === "selectSingle" && paths.length > 1)
               return yield* browserFailure(new Error("The file chooser accepts only one file."));
-            yield* this.#clearFileInputEffect(send, backendNodeId, chooserSessionId);
-            yield* send("DOM.setFileInputFiles", { backendNodeId, files: paths }, chooserSessionId);
+            const fileSessionId = opened.eventSessionId ?? ownSessionId;
+            yield* this.#clearFileInputEffect(send, backendNodeId, fileSessionId);
+            yield* send("DOM.setFileInputFiles", { backendNodeId, files: paths }, fileSessionId);
           }).pipe(
             Effect.ensuring(
               Effect.gen(function* () {
                 stopWaitingForChooser();
-                // Detaching the own session drops its interception and Page domain with it.
-                if (ownSessionId) return;
-                yield* send("Page.setInterceptFileChooserDialog", { enabled: false }, chooserSessionId).pipe(
-                  Effect.ignore,
-                );
-                yield* send("Page.disable", {}, chooserSessionId).pipe(Effect.ignore);
+                for (const targetSessionId of interceptSessions) {
+                  if (targetSessionId === ownSessionId) continue;
+                  yield* send("Page.setInterceptFileChooserDialog", { enabled: false }, targetSessionId).pipe(
+                    Effect.ignore,
+                  );
+                }
               }),
             ),
           );
@@ -2375,7 +2518,7 @@ export class BrowserCdpEngine {
   /** The dialog that is open now, if this engine saw it open. */
   get dialog(): BrowserDialog | undefined {
     if (!this.#dialog) return undefined;
-    const { owner: _owner, ...dialog } = this.#dialog;
+    const { owner: _owner, sessionId: _sessionId, defaultPrompt: _defaultPrompt, ...dialog } = this.#dialog;
     return dialog;
   }
 
@@ -2407,11 +2550,19 @@ export class BrowserCdpEngine {
   ): Effect.fn.Return<void, BrowserOperationError> {
     if (this.#dialog?.id !== id) return yield* browserFailure(new Error(DIALOG_CLOSED_ERROR));
     if (!this.dialogOwnedBy(owner)) return yield* browserFailure(new Error(DIALOG_FOR_PERSON_ERROR));
+    const dialogSessionId = this.#dialog.sessionId;
+    const promptText = this.#dialog.type === "prompt" && accept ? (this.#dialog.defaultPrompt ?? "") : undefined;
     const answered = yield* browserCall(() =>
-      this.#contents.debugger.sendCommand("Page.handleJavaScriptDialog", { accept }).then(() => {
-        // In the same task as the answer, before the page can open its next dialog.
-        this.#contents.emit(CANCEL_DIALOGS_EVENT);
-      }),
+      this.#contents.debugger
+        .sendCommand(
+          "Page.handleJavaScriptDialog",
+          { accept, ...(promptText === undefined ? {} : { promptText }) },
+          dialogSessionId,
+        )
+        .then(() => {
+          // In the same task as the answer, before the page can open its next dialog.
+          this.#contents.emit(CANCEL_DIALOGS_EVENT);
+        }),
     ).pipe(
       Effect.as(true),
       // "No dialog is showing": a person answered first.
@@ -2454,10 +2605,10 @@ export class BrowserCdpEngine {
     if (this.#dialog) this.#detachOwnedDebugger();
   }
 
-  #dialogOpened(params: DynamicRecord): void {
+  #dialogOpened(params: DynamicRecord, sessionId?: string): void {
     const type = stringValue(params.type);
-    // Electron answers `prompt` and `beforeunload` itself, with no box.
-    if (type !== "alert" && type !== "confirm") return;
+    // Electron answers `beforeunload` itself, with no box.
+    if (type !== "alert" && type !== "confirm" && type !== "prompt") return;
     if (this.#dialogsReleased) {
       // As in `releaseDialogs`: a command that waits for this dialog must not hold the closing tab.
       this.#dialogBoxPending = true;
@@ -2466,6 +2617,7 @@ export class BrowserCdpEngine {
     }
     const watch = [...this.#dialogWatches].at(-1);
     const agent = watch !== undefined && this.#ownsDebugger && this.#contents.listenerCount(CANCEL_DIALOGS_EVENT) > 0;
+    const defaultPrompt = isString(params.defaultPrompt) ? params.defaultPrompt : undefined;
     const dialog: BrowserDialog = {
       id: randomUUID(),
       type,
@@ -2473,7 +2625,12 @@ export class BrowserCdpEngine {
       message: redactText(this.#cardScrub.text(stringValue(params.message))).slice(0, DIALOG_MESSAGE_LIMIT),
       agent,
     };
-    this.#dialog = { ...dialog, owner: agent ? watch.owner : undefined };
+    this.#dialog = {
+      ...dialog,
+      owner: agent ? watch.owner : undefined,
+      ...(sessionId === undefined ? {} : { sessionId }),
+      ...(defaultPrompt === undefined ? {} : { defaultPrompt }),
+    };
     this.#dialogBoxPending = true;
     for (const current of this.#dialogWatches) Deferred.doneUnsafe(current.opened, Effect.succeed(dialog));
     this.#signalDialogChange();
@@ -3391,7 +3548,8 @@ export class BrowserCdpEngine {
         ? `@e${target.ref.trim().replace(/^@?e/iu, "")}`
         : target.ref;
       const record = this.#targets.get(normalizedRef) ?? this.#targets.get(target.ref);
-      if (!record)
+      const sessionId = record?.targetId ? this.#targetSessions.get(record.targetId)?.sessionId : undefined;
+      if (!record || (record.targetId && sessionId === undefined))
         return yield* browserFailure(new Error("Element reference is no longer available. Take a fresh snapshot."));
       if (deadline !== undefined) {
         yield* browserSync(() => assertBeforeDeadline(deadline));
@@ -3403,7 +3561,14 @@ export class BrowserCdpEngine {
         const current =
           record.ownFrame && contextId === undefined
             ? null
-            : yield* this.#targetFingerprint(send, record.backendNodeId, sessionId, record.drawnOnly, contextId).pipe(
+            : yield* this.#targetFingerprint(
+                send,
+                record.backendNodeId,
+                sessionId,
+                record.drawnOnly,
+                contextId,
+                record.fileInput === true,
+              ).pipe(
                 Effect.catch(() => Effect.succeed(null)),
               );
         yield* browserSync(() => assertBeforeDeadline(deadline));
@@ -3659,6 +3824,7 @@ export class BrowserCdpEngine {
     sessionId?: string,
     drawnOnly = false,
     contextId?: number,
+    allowHiddenFile = false,
   ): Effect.fn.Return<
     { role: string; name: string; tag: string; visibleText: string; visible: boolean },
     BrowserOperationError
@@ -3671,8 +3837,12 @@ export class BrowserCdpEngine {
           send,
           backendNodeId,
           // A ref of the fallback snapshot pass is in an aria-hidden or opacity 0 container that the page draws.
-          String.raw`function(drawnOnly) {
-          if (this.nodeType !== 1 || !this.isConnected || this.getClientRects().length === 0) return null;
+          String.raw`function(drawnOnly, allowHiddenFile) {
+          if (this.nodeType !== 1 || !this.isConnected) return null;
+          if (allowHiddenFile && this.localName === 'input' && this.type === 'file') {
+            return { visibleText: '' };
+          }
+          if (this.getClientRects().length === 0) return null;
           let element = this;
           while (element) {
             if (Element.prototype.hasAttribute.call(element, 'hidden') || Element.prototype.hasAttribute.call(element, 'inert') || (!drawnOnly && String(element.getAttribute('aria-hidden')).toLowerCase() === 'true')) return null;
@@ -3687,7 +3857,7 @@ export class BrowserCdpEngine {
           }
           return { visibleText: String(this.innerText ?? this.textContent ?? '').replace(/\s+/g, ' ').trim().slice(0, 500) };
         }`,
-          [drawnOnly],
+          [drawnOnly, allowHiddenFile],
           sessionId,
           contextId,
         ),
@@ -3845,9 +4015,21 @@ export class BrowserCdpEngine {
     sessionId?: string,
     contextId?: number,
   ): Effect.fn.Return<unknown, BrowserOperationError> {
-    const executionContextId = contextId ?? (yield* automationContextId(send, sessionId));
-    const resolved = yield* send("DOM.resolveNode", { backendNodeId, executionContextId }, sessionId);
-    const objectId = stringValue(recordValue(resolved.object)?.objectId);
+    const resolveInContext = (executionContextId: number) =>
+      send("DOM.resolveNode", { backendNodeId, executionContextId }, sessionId).pipe(
+        Effect.map((result) => stringValue(recordValue(result.object)?.objectId)),
+        Effect.catch(() => Effect.succeed("")),
+      );
+    const primaryContextId = contextId ?? (yield* automationContextId(send, sessionId));
+    let objectId = yield* resolveInContext(primaryContextId);
+    if (!objectId && contextId === undefined) {
+      const frameContextId = yield* this.#nodeFrameContextId(send, backendNodeId, sessionId).pipe(
+        Effect.catch(() => Effect.succeed(undefined)),
+      );
+      if (frameContextId !== undefined && frameContextId !== primaryContextId) {
+        objectId = yield* resolveInContext(frameContextId);
+      }
+    }
     if (!objectId) return yield* browserFailure(new Error("Element is no longer attached to the document."));
     return yield* Effect.gen({ self: this }, function* () {
       const result = yield* send(
@@ -4191,6 +4373,9 @@ const hitActivatesTarget = Effect.fn("Browser.hitActivatesTarget")(function* (
         // web component puts into its shadow button belongs to that button.
         functionDeclaration: `function(candidate) {
           const start = candidate instanceof CSSPseudoElement ? candidate.element : candidate;
+          if ((this.localName === 'iframe' || this.localName === 'frame') && start?.ownerDocument && start.ownerDocument !== this.ownerDocument) {
+            return true;
+          }
           for (let node = start; node; node = node.assignedSlot || node.parentNode || node.host) {
             if (node === this) return true;
             if (node.localName === 'label' && node.control === this) return true;

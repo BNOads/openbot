@@ -3018,7 +3018,13 @@ export class BrowserHost {
           }),
         ),
       );
-    if ("result" in outcome) return this.#withIdleUnloadNote(params, calledTabId, outcome.result);
+    if ("result" in outcome) {
+      return this.#withPopupNote(
+        params,
+        calledTabId,
+        this.#withIdleUnloadNote(params, calledTabId, outcome.result),
+      );
+    }
     // The agent's control of the tab ended above, so the wait does not show the agent at work.
     if (hooks.onUserControl) return yield* hooks.onUserControl(outcome.heldTabId);
     return {
@@ -3045,6 +3051,44 @@ export class BrowserHost {
     if (!listed || !this.#canUseToolTab(params, listed)) return result;
     noted.add(params.threadId);
     return { ...result, contentItems: [...result.contentItems, { type: "inputText", text: IDLE_UNLOAD_NOTE }] };
+  }
+
+  /**
+   * Appends a concise notice whenever an action's tab has open child popups (`window.open` / `target="_blank"`)
+   * or suffered a blocked popup, so the agent sees and switches to the popup tab immediately.
+   */
+  #withPopupNote(
+    params: DynamicToolCallParams,
+    tabId: string | undefined,
+    result: DynamicToolResult,
+  ): DynamicToolResult {
+    if (tabId === undefined) return result;
+    const notes: string[] = [];
+    const tab = this.#tabs.get(tabId);
+    if (tab?.popupFailure) {
+      notes.push(`Popup blocked on tab ${tabId}: ${tab.popupFailure.message}`);
+    }
+    const popups = this.listTabs().filter(
+      (candidate) => candidate.openerTabId === tabId && this.#canUseToolTab(params, candidate),
+    );
+    if (popups.length > 0) {
+      const summary = popups
+        .map((popup) => {
+          const engine = this.#tabs.get(popup.id)?.engine;
+          const url = engine ? engine.scrubText(popup.url) : popup.url;
+          const title = engine ? engine.scrubText(popup.title) : popup.title;
+          return `${popup.id} (url: ${url}${title ? `, title: ${title}` : ""})`;
+        })
+        .join("; ");
+      notes.push(
+        `Child popup tab(s) opened from ${tabId}: ${summary}. Call snapshot or list_tabs on the popup tabId to view and act inside it.`,
+      );
+    }
+    if (notes.length === 0) return result;
+    return {
+      ...result,
+      contentItems: [...result.contentItems, { type: "inputText", text: notes.join("\n") }],
+    };
   }
 
   #toolTabs(params: DynamicToolCallParams): { tabs: BrowserTab[]; activeTabId: string | null } {
@@ -4231,7 +4275,7 @@ export class BrowserHost {
     });
     contents.setWindowOpenHandler(({ url, referrer, postBody, disposition }) => {
       if (this.#destroying || this.#tabs.get(tab.id) !== tab) return { action: "deny" };
-      const unsupported = !["foreground-tab", "background-tab", "new-window"].includes(disposition);
+      const unsupported = !["default", "foreground-tab", "background-tab", "new-window"].includes(disposition);
       const failure = tab.secret
         ? sourceText("error.backend.popupSecureInput")
         : unsupported

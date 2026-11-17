@@ -129,28 +129,36 @@ export const dispatchShortcut = Effect.fn("Browser.dispatchShortcut")(function* 
     .map((part) => part.trim())
     .filter(Boolean);
   if (parts.length === 0 || parts.length > 5) return yield* browserFailure(new Error("Invalid browser shortcut."));
-  const key = parts.pop();
-  if (!key) return yield* browserFailure(new Error("Invalid browser shortcut."));
+  const rawKey = parts.pop();
+  if (!rawKey) return yield* browserFailure(new Error("Invalid browser shortcut."));
   const modifierNames: string[] = [];
   for (const part of parts) {
     const modifier = normalizeModifier(part);
     if (!modifier) return yield* browserFailure(new Error(`Invalid browser shortcut: ${shortcut}`));
     modifierNames.push(modifier);
   }
-  const { text: keyText, ...normalized } = yield* browserSync(() => normalizeKey(key));
+  const normalizedBase = yield* browserSync(() => normalizeKey(rawKey));
+  // If a standalone shifted character was named directly (e.g. `press("@")`, `press("At")`, `press("_")`),
+  // automatically include Shift when no other modifiers were given so key events carry the shifted state.
+  if (modifierNames.length === 0 && normalizedBase.impliedShift) {
+    modifierNames.push("Shift");
+  }
+  const { text: keyText, impliedShift: _impliedShift, unmodifiedText: baseUnmodifiedText, ...normalized } = normalizedBase;
   const modifiers = modifierMask(modifierNames);
   const shiftOnly = modifiers === SHIFT_MODIFIER;
-  // A named key gets its character from the alias table; a single-character shortcut is its own.
-  // A command modifier gets none, because `Ctrl+S` is a command rather than an `s` in the document.
-  // Shift is not one of those: `Shift+Enter` is how a composer spells "line break, do not submit",
-  // and suppressing its character made the shortcut fire a key event, insert nothing, and report
-  // success. Which glyph Shift produces is only knowable for the alias keys, whose text does not
-  // depend on it, and for a letter -- `Shift+1` is `!` on a US layout and something else on half a
-  // dozen others, so it stays a key event rather than a guessed character.
-  const character = keyText ?? (key.length === 1 ? (shiftOnly ? shiftedLetter(key) : key) : undefined);
-  // A real `Shift+a` reports `A` in `event.key`, not an `a` with a shift flag beside it, and the
-  // character event has to agree with the key events around it.
-  const keyInfo = shiftOnly && keyText === undefined && character ? { ...normalized, key: character } : normalized;
+  const key = normalized.key;
+  const shiftedSymbol = key.length === 1 ? (US_SHIFTED_BY_PLAIN.get(key) ?? shiftedLetter(key)) : undefined;
+  // A named key gets its character from the alias table; a single-character shortcut uses Shift mapping
+  // (letters A-Z and US shifted symbols such as Shift+2 -> @, Shift+- -> _).
+  const character = keyText ?? (key.length === 1 ? (shiftOnly ? shiftedSymbol : key) : undefined);
+  const unmodifiedCharacter =
+    shiftOnly && keyText === undefined
+      ? (baseUnmodifiedText ?? (key.length === 1 ? (US_PLAIN_BY_SHIFTED.get(key) ?? key.toLowerCase()) : undefined))
+      : key.length === 1
+        ? (baseUnmodifiedText ?? key)
+        : keyText;
+  const keyInfo =
+    shiftOnly && keyText === undefined && character ? { ...normalized, key: character } : normalized;
   const pressedModifiers: string[] = [];
   let keyPressed = false;
   yield* Effect.gen(function* () {
@@ -167,13 +175,34 @@ export const dispatchShortcut = Effect.fn("Browser.dispatchShortcut")(function* 
       );
       pressedModifiers.push(modifier);
     }
-    yield* send("Input.dispatchKeyEvent", { type: "rawKeyDown", ...keyInfo, modifiers }, sessionId);
+    yield* send(
+      "Input.dispatchKeyEvent",
+      {
+        type: "rawKeyDown",
+        ...keyInfo,
+        modifiers,
+        ...(character !== undefined && (modifiers === 0 || shiftOnly)
+          ? { text: character, unmodifiedText: unmodifiedCharacter ?? character }
+          : {}),
+      },
+      sessionId,
+    );
     keyPressed = true;
     if (character !== undefined && (modifiers === 0 || shiftOnly))
       // The keypress has to agree with the keydown around it. Without the mask CDP defaults it to
       // zero, so `Shift+Enter` arrives at the page as an unshifted Enter -- and a composer that
       // decides between "send" and "line break" in its keypress handler sends the message.
-      yield* send("Input.dispatchKeyEvent", { type: "char", ...keyInfo, modifiers, text: character }, sessionId);
+      yield* send(
+        "Input.dispatchKeyEvent",
+        {
+          type: "char",
+          ...keyInfo,
+          modifiers,
+          text: character,
+          unmodifiedText: unmodifiedCharacter ?? character,
+        },
+        sessionId,
+      );
     yield* send("Input.dispatchKeyEvent", { type: "keyUp", ...keyInfo, modifiers }, sessionId);
     keyPressed = false;
   }).pipe(
@@ -230,6 +259,14 @@ const US_SYMBOL_KEYS: readonly (readonly [string, string, string, number])[] = [
   ["0", ")", "Digit0", 48],
 ];
 
+const US_PLAIN_BY_SHIFTED: ReadonlyMap<string, string> = new Map<string, string>(
+  US_SYMBOL_KEYS.map(([plain, shifted]) => [shifted, plain]),
+);
+
+const US_SHIFTED_BY_PLAIN: ReadonlyMap<string, string> = new Map<string, string>(
+  US_SYMBOL_KEYS.map(([plain, shifted]) => [plain, shifted]),
+);
+
 interface UsKey {
   readonly code: string;
   readonly keyCode: number;
@@ -252,6 +289,36 @@ const US_KEYS: ReadonlyMap<string, UsKey> = new Map<string, UsKey>([
       [shifted, { code, keyCode, shift: true }],
     ],
   ),
+]);
+
+const CODE_KEY_TO_CHAR: ReadonlyMap<string, string> = new Map<string, string>([
+  ...[..."0123456789"].map((d): [string, string] => [`digit${d}`, d]),
+  ...[..."abcdefghijklmnopqrstuvwxyz"].map((l): [string, string] => [`key${l}`, l]),
+  ["minus", "-"],
+  ["equal", "="],
+  ["bracketleft", "["],
+  ["bracketright", "]"],
+  ["backslash", "\\"],
+  ["semicolon", ";"],
+  ["quote", "'"],
+  ["comma", ","],
+  ["period", "."],
+  ["slash", "/"],
+  ["backquote", "`"],
+  ["at", "@"],
+  ["underscore", "_"],
+  ["plus", "+"],
+  ["exclamation", "!"],
+  ["hash", "#"],
+  ["dollar", "$"],
+  ["percent", "%"],
+  ["caret", "^"],
+  ["ampersand", "&"],
+  ["asterisk", "*"],
+  ["tilde", "~"],
+  ["pipe", "|"],
+  ["colon", ":"],
+  ["question", "?"],
 ]);
 
 /**
@@ -344,6 +411,8 @@ export const dispatchTextKey = Effect.fn("Browser.dispatchTextKey")(function* (
 ) {
   // A character that has no US key keeps the key event that Chromium gives an unknown key.
   const usKey = US_KEYS.get(character);
+  const unmodified =
+    US_PLAIN_BY_SHIFTED.get(character) ?? (/^[A-Z]$/.test(character) ? character.toLowerCase() : character);
   const key = {
     key: character,
     code: usKey?.code ?? "Unidentified",
@@ -353,12 +422,12 @@ export const dispatchTextKey = Effect.fn("Browser.dispatchTextKey")(function* (
   yield* Effect.gen(function* () {
     yield* send(
       "Input.dispatchKeyEvent",
-      { type: "rawKeyDown", ...key, text: character, unmodifiedText: character },
+      { type: "rawKeyDown", ...key, text: character, unmodifiedText: unmodified },
       sessionId,
     );
     yield* send(
       "Input.dispatchKeyEvent",
-      { type: "char", ...key, text: character, unmodifiedText: character },
+      { type: "char", ...key, text: character, unmodifiedText: unmodified },
       sessionId,
     );
     yield* send("Input.dispatchKeyEvent", { type: "keyUp", ...key }, sessionId);
@@ -404,6 +473,8 @@ function normalizeKey(key: string): {
   windowsVirtualKeyCode?: number | undefined;
   nativeVirtualKeyCode?: number | undefined;
   text?: string;
+  impliedShift?: boolean | undefined;
+  unmodifiedText?: string | undefined;
 } {
   const alias = KEY_ALIASES[key.toLowerCase()];
   if (alias) {
@@ -416,10 +487,22 @@ function normalizeKey(key: string): {
       ...(nativeVirtualKeyCode === undefined ? {} : { nativeVirtualKeyCode }),
     };
   }
+  const mappedChar = CODE_KEY_TO_CHAR.get(key.toLowerCase()) ?? key;
+  if (mappedChar.length === 1 && US_KEYS.has(mappedChar)) {
+    const usKey = US_KEYS.get(mappedChar)!;
+    const unmodified =
+      US_PLAIN_BY_SHIFTED.get(mappedChar) ??
+      (/^[A-Z]$/.test(mappedChar) ? mappedChar.toLowerCase() : mappedChar);
+    return {
+      key: mappedChar,
+      code: usKey.code,
+      windowsVirtualKeyCode: usKey.keyCode,
+      impliedShift: usKey.shift,
+      unmodifiedText: unmodified,
+    };
+  }
   if (!/^[\w\-.,/;='[\]`]{1,20}$/u.test(key)) throw new Error(`Unsupported browser key: ${key}`);
   const upper = key.length === 1 ? key.toUpperCase() : key;
-  // Chromium finds the editing command of a shortcut, such as Select All for `Ctrl+A` or Copy for
-  // `Ctrl+C`, from the key code. Without it, the shortcut does nothing in the page.
   const usKey = key.length === 1 ? US_KEYS.get(key) : undefined;
   return {
     key,

@@ -14,6 +14,7 @@ tar -czf /tmp/openbot-out.tar.gz out scripts/update-asar-out.mjs
 
 echo "==> 3. Criando backup seguro no VPS ($VPS_HOST) antes de atualizar..."
 STAMP="$(date +%Y-%m-%d-%H%M)"
+ssh-add --apple-load-keychain >/dev/null 2>&1 || true
 ssh -o BatchMode=yes "$VPS_HOST" "mkdir -p /opt/openbot/custom-build && docker exec -u root openbot sh -c 'mkdir -p /data/backups && cp -a /data/.config/OpenBot/openbot.db /data/backups/openbot.db.bak-$STAMP && cp -a /opt/OpenBot/app/resources/app.asar /data/backups/app.asar.bak-$STAMP'"
 
 echo "==> 4. Enviando e aplicando build no container openbot ($VPS_HOST)..."

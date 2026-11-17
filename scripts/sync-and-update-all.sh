@@ -7,6 +7,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 FROM_UI="false"
 VPS_HOST="root@187.77.46.223"
+REOPENED="false"
+UPDATE_OK="false"
 
 for arg in "$@"; do
   if [ "$arg" = "--from-ui" ]; then
@@ -16,17 +18,42 @@ for arg in "$@"; do
   fi
 done
 
+notify() {
+  if [ "$FROM_UI" = "true" ]; then
+    osascript -e "display notification \"$1\" with title \"OpenBot Atualizador\"" >/dev/null 2>&1 || true
+  fi
+}
+
+cleanup_on_exit() {
+  local exit_code=$?
+  if [ "$FROM_UI" = "true" ]; then
+    if [ "$REOPENED" != "true" ]; then
+      echo "==> Reabrindo /Applications/OpenBot.app após saída (código $exit_code)..."
+      open -a /Applications/OpenBot.app >/dev/null 2>&1 || true
+      REOPENED="true"
+    fi
+    if [ "$UPDATE_OK" != "true" ] && [ "$exit_code" -ne 0 ]; then
+      notify "Falha ao atualizar. Veja /tmp/openbot-fork-update.log"
+    fi
+  fi
+}
+trap cleanup_on_exit EXIT
+
 cd "$PROJECT_ROOT"
 
 if [ "$FROM_UI" = "true" ]; then
   exec >> /tmp/openbot-fork-update.log 2>&1
   echo "===================================================="
   echo "[$(date -Is)] Atualização acionada pelo botão Reiniciar do OpenBot"
+  notify "Atualizando OpenBot (oficial + suas melhorias)..."
   sleep 2
 fi
 
+ssh-add --apple-load-keychain >/dev/null 2>&1 || true
+PRE_MERGE_HEAD="$(git rev-parse HEAD)"
+
 echo "==> 1. Buscando novidades do OpenBot oficial (nightly-labs/openbot)..."
-git fetch upstream main --tags
+git fetch upstream main --tags || true
 
 echo "==> 2. Mesclando novidades oficiais mantendo as melhorias do fork (BNOads/openbot)..."
 git add -A && git diff --cached --quiet || git commit --no-verify -m "chore: save local changes before upstream sync" || true
@@ -39,12 +66,24 @@ fi
 echo "==> 3. Garantindo dependências atualizadas..."
 bun install --no-save || true
 
-echo "==> 4. Atualizando o aplicativo no seu Mac (/Applications/OpenBot.app)..."
-"$SCRIPT_DIR/update-mac-app.sh"
+echo "==> 4. Verificando e atualizando o aplicativo no Mac (/Applications/OpenBot.app)..."
+if ! "$SCRIPT_DIR/update-mac-app.sh"; then
+  echo "!! Compilação falhou após merge; restaurando commit anterior seguro ($PRE_MERGE_HEAD)..."
+  git merge --abort >/dev/null 2>&1 || true
+  git reset --hard "$PRE_MERGE_HEAD"
+  "$SCRIPT_DIR/update-mac-app.sh"
+  if [ "$FROM_UI" = "true" ]; then
+    open -a /Applications/OpenBot.app
+    REOPENED="true"
+  fi
+  exit 1
+fi
 
 if [ "$FROM_UI" = "true" ]; then
   echo "==> 5. Reabrindo /Applications/OpenBot.app..."
   open -a /Applications/OpenBot.app
+  REOPENED="true"
+  notify "Mac atualizado! Sincronizando GitHub e VPS..."
 fi
 
 echo "==> 6. Salvando no seu GitHub (BNOads/openbot)..."
@@ -53,4 +92,6 @@ git push --no-verify origin main || true
 echo "==> 7. Atualizando a VPS ($VPS_HOST) com backup automático e zero perda de dados..."
 "$SCRIPT_DIR/deploy-vps.sh" "$VPS_HOST" || true
 
+UPDATE_OK="true"
+notify "OpenBot atualizado no Mac e na VPS com sucesso!"
 echo "==> [$(date -Is)] Tudo atualizado com sucesso (Oficial + Suas Melhorias no Mac e na VPS)!"

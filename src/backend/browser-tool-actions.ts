@@ -78,7 +78,7 @@ export function browserInputAction(call: BrowserInputCall, hooks: BrowserDynamic
             args.target,
             args.text,
             {
-              ...(args.target ? { mode: args.mode ?? "replace" } : {}),
+              ...(args.target && args.target.kind !== "point" ? { mode: args.mode ?? "replace" } : {}),
               submit: args.submit === true,
             },
             deadline,

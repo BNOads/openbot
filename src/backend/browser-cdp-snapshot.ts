@@ -121,6 +121,8 @@ export interface TargetRecord {
   drawnOnly?: true;
   /** It is in a frame that the walk of the capture's root frame cannot enter, so checks run in its frame. */
   ownFrame?: true;
+  /** Hidden or opacity-0 <input type="file"> that DOM.setFileInputFiles can populate directly. */
+  fileInput?: true;
 }
 
 export interface SnapshotTarget {
@@ -238,6 +240,7 @@ const collectSnapshotPass = Effect.fn("Browser.collectSnapshotPass")(function* (
         visibleText: candidate.visibleText,
         ...(drawnOnly ? { drawnOnly: true as const } : {}),
         ...(contextId === undefined ? {} : { ownFrame: true as const }),
+        ...(candidate.isFileInput ? { fileInput: true as const } : {}),
       });
       if (elements.length >= MAX_SNAPSHOT_ELEMENTS) break;
     }
@@ -292,6 +295,31 @@ const frameDocumentContexts = Effect.fn("Browser.frameDocumentContexts")(functio
   return contexts;
 });
 
+/** All isolated automation context IDs within one target session: top frame plus cross-origin child frames. */
+const captureContextIds = Effect.fn("Browser.captureContextIds")(function* (
+  send: SendCommand,
+  sessionId?: string,
+  limit = MAX_FRAME_DOCUMENTS,
+) {
+  const top = yield* automationContextId(send, sessionId).pipe(skipGoneFrame(sessionId, undefined));
+  const nested = yield* frameDocumentContexts(send, sessionId, limit).pipe(Effect.catch(() => Effect.succeed([])));
+  return top === undefined ? nested : [top, ...nested];
+});
+
+const ACTIVE_MODAL_ROOTS_SNIPPET = `(() => {
+  const found = [];
+  const modalSelector = 'dialog[open], [aria-modal="true"], [role="dialog"], [role="alertdialog"], :popover-open';
+  const inspect = (doc) => {
+    try {
+      for (const el of doc.querySelectorAll(modalSelector)) {
+        if (el.getClientRects().length > 0) found.push(el);
+      }
+    } catch {}
+  };
+  inspect(document);
+  return found;
+})()`;
+
 const collectPageSummaryEffect = Effect.fn("Browser.collectPageSummary")(function* (
   send: SendCommand,
   sessionId: string | undefined,
@@ -306,7 +334,7 @@ const collectPageSummaryEffect = Effect.fn("Browser.collectPageSummary")(functio
       expression: `(() => {
         const maxNodes = ${MAX_SNAPSHOT_SCANNED_NODES};
         const maxText = ${maxText};
-        const roots = [document];
+        const roots = [...${ACTIVE_MODAL_ROOTS_SNIPPET}, document];
         const seen = new Set();
         // Text in the viewport comes first: a dialog is often the last child of the body, and the
         // page behind it would otherwise fill the budget.
@@ -437,68 +465,68 @@ export const pageContainsText = Effect.fn("Browser.pageContainsText")(function* 
 ) {
   for (const capture of captures) {
     yield* browserSync(() => assertBeforeDeadline(deadline));
-    const scanBudgetMs = Math.max(1, deadline - Date.now());
-    const contextId = yield* automationContextId(send, capture.sessionId).pipe(
-      skipGoneFrame(capture.sessionId, undefined),
-    );
-    if (contextId === undefined) continue;
-    const result = yield* send(
-      "Runtime.evaluate",
-      {
-        expression: `(() => {
-          const needle = ${JSON.stringify(text)};
-          const scanDeadline = performance.now() + ${scanBudgetMs};
-          const roots = [document];
-          const seen = new Set();
-          let combined = '';
-          let chars = 0;
-          let scanned = 0;
-          const isVisibleText = node => {
-            const range = node.ownerDocument.createRange();
-            range.selectNodeContents(node);
-            return range.getClientRects().length > 0;
-          };
-          while (roots.length && scanned < ${MAX_SNAPSHOT_SCANNED_NODES} && chars < ${MAX_SCANNED_TEXT}) {
-            if (performance.now() >= scanDeadline) return { matched: false, expired: true };
-            const root = roots.shift();
-            if (!root || seen.has(root)) continue;
-            seen.add(root);
-            const walker = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT, ${SKIP_HIDDEN_SUBTREES});
-            let node;
-            while ((node = walker.nextNode()) && scanned < ${MAX_SNAPSHOT_SCANNED_NODES}) {
+    const contexts = yield* captureContextIds(send, capture.sessionId);
+    for (const contextId of contexts) {
+      yield* browserSync(() => assertBeforeDeadline(deadline));
+      const scanBudgetMs = Math.max(1, deadline - Date.now());
+      const result = yield* send(
+        "Runtime.evaluate",
+        {
+          expression: `(() => {
+            const needle = ${JSON.stringify(text)};
+            const scanDeadline = performance.now() + ${scanBudgetMs};
+            const roots = [document];
+            const seen = new Set();
+            let combined = '';
+            let chars = 0;
+            let scanned = 0;
+            const isVisibleText = node => {
+              const range = node.ownerDocument.createRange();
+              range.selectNodeContents(node);
+              return range.getClientRects().length > 0;
+            };
+            while (roots.length && scanned < ${MAX_SNAPSHOT_SCANNED_NODES} && chars < ${MAX_SCANNED_TEXT}) {
               if (performance.now() >= scanDeadline) return { matched: false, expired: true };
-              scanned++;
-              if (node.nodeType === Node.TEXT_NODE) {
-                const parentTag = node.parentElement?.localName;
-                if (parentTag === 'script' || parentTag === 'style' || parentTag === 'noscript' || parentTag === 'template') continue;
-                if (!isVisibleText(node)) continue;
-                const value = String(node.nodeValue || '').replace(/\\s+/g, ' ').trim();
-                if (value) {
-                  const part = value.slice(0, Math.max(0, ${MAX_SCANNED_TEXT} - chars));
-                  combined += (combined ? ' ' : '') + part;
-                  chars += part.length + 1;
-                  if (combined.includes(needle)) return { matched: true, expired: false };
+              const root = roots.shift();
+              if (!root || seen.has(root)) continue;
+              seen.add(root);
+              const walker = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT, ${SKIP_HIDDEN_SUBTREES});
+              let node;
+              while ((node = walker.nextNode()) && scanned < ${MAX_SNAPSHOT_SCANNED_NODES}) {
+                if (performance.now() >= scanDeadline) return { matched: false, expired: true };
+                scanned++;
+                if (node.nodeType === Node.TEXT_NODE) {
+                  const parentTag = node.parentElement?.localName;
+                  if (parentTag === 'script' || parentTag === 'style' || parentTag === 'noscript' || parentTag === 'template') continue;
+                  if (!isVisibleText(node)) continue;
+                  const value = String(node.nodeValue || '').replace(/\\s+/g, ' ').trim();
+                  if (value) {
+                    const part = value.slice(0, Math.max(0, ${MAX_SCANNED_TEXT} - chars));
+                    combined += (combined ? ' ' : '') + part;
+                    chars += part.length + 1;
+                    if (combined.includes(needle)) return { matched: true, expired: false };
+                  }
+                  continue;
                 }
-                continue;
+                if (node.nodeType !== 1) continue;
+                if ((node.localName === 'iframe' || node.localName === 'frame')) {
+                  try { if (node.contentDocument) roots.push(node.contentDocument); } catch {}
+                }
+                if (node.shadowRoot) roots.push(node.shadowRoot);
               }
-              if (node.nodeType !== 1) continue;
-              if ((node.localName === 'iframe' || node.localName === 'frame')) {
-                try { if (node.contentDocument) roots.push(node.contentDocument); } catch {}
-              }
-              if (node.shadowRoot) roots.push(node.shadowRoot);
             }
-          }
-          return { matched: combined.includes(needle), expired: false };
-        })()`,
-        contextId,
-        returnByValue: true,
-      },
-      capture.sessionId,
-    ).pipe(Effect.catch(() => Effect.succeed(null)));
-    yield* browserSync(() => assertBeforeDeadline(deadline));
-    const value = recordValue(recordValue(result?.result)?.value);
-    if (value?.expired === true) return yield* browserFailure(new Error("Browser wait condition timed out."));
-    if (value?.matched === true) return true;
+            return { matched: combined.includes(needle), expired: false };
+          })()`,
+          contextId,
+          returnByValue: true,
+        },
+        capture.sessionId,
+      ).pipe(Effect.catch(() => Effect.succeed(null)));
+      yield* browserSync(() => assertBeforeDeadline(deadline));
+      const value = recordValue(recordValue(result?.result)?.value);
+      if (value?.expired === true) return yield* browserFailure(new Error("Browser wait condition timed out."));
+      if (value?.matched === true) return true;
+    }
   }
   return false;
 });
@@ -509,53 +537,74 @@ export const cssObjectMatch = Effect.fn("Browser.cssObjectMatch")(function* (
   sessionId?: string,
   limit = MAX_TARGET_CANDIDATES,
 ) {
-  const contextId = yield* automationContextId(send, sessionId);
-  const collection = yield* send(
-    "Runtime.evaluate",
-    {
-      expression: `(() => {
-        const selector = ${JSON.stringify(selector)};
-        const roots = [document];
-        const seen = new Set();
-        const matches = [];
-        let scanned = 0;
-        let truncated = false;
-        while (roots.length && matches.length < ${limit}) {
-          const root = roots.shift();
-          if (!root || seen.has(root)) continue;
-          seen.add(root);
-          // The native query finds each match in this root, also on a very large page.
-          for (const node of root.querySelectorAll(selector)) {
-            matches.push(node);
-            if (matches.length >= ${limit}) break;
-          }
-          if (truncated || matches.length >= ${limit}) continue;
-          // Only the search for shadow roots and frames, which the native query does not enter, is bounded.
-          const walker = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT);
-          let node;
-          while ((node = walker.nextNode())) {
-            if (scanned >= ${MAX_SNAPSHOT_SCANNED_NODES}) {
-              truncated = true;
-              break;
+  const contexts = yield* captureContextIds(send, sessionId);
+  const collected: string[] = [];
+  for (const contextId of contexts) {
+    const remaining = limit - collected.length;
+    if (remaining <= 0) break;
+    const collection = yield* send(
+      "Runtime.evaluate",
+      {
+        expression: `(() => {
+          const selector = ${JSON.stringify(selector)};
+          const roots = [document];
+          const seen = new Set();
+          const matches = [];
+          let scanned = 0;
+          let truncated = false;
+          while (roots.length && matches.length < ${remaining}) {
+            const root = roots.shift();
+            if (!root || seen.has(root)) continue;
+            seen.add(root);
+            // The native query finds each match in this root, also on a very large page.
+            for (const node of root.querySelectorAll(selector)) {
+              matches.push(node);
+              if (matches.length >= ${remaining}) break;
             }
-            scanned++;
-            if (node.localName === 'iframe' || node.localName === 'frame') {
-              try { if (node.contentDocument) roots.push(node.contentDocument); } catch {}
+            if (truncated || matches.length >= ${remaining}) continue;
+            // Only the search for shadow roots and frames, which the native query does not enter, is bounded.
+            const walker = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT);
+            let node;
+            while ((node = walker.nextNode())) {
+              if (scanned >= ${MAX_SNAPSHOT_SCANNED_NODES}) {
+                truncated = true;
+                break;
+              }
+              scanned++;
+              if (node.localName === 'iframe' || node.localName === 'frame') {
+                try { if (node.contentDocument) roots.push(node.contentDocument); } catch {}
+              }
+              if (node.shadowRoot) roots.push(node.shadowRoot);
             }
-            if (node.shadowRoot) roots.push(node.shadowRoot);
           }
-        }
-        if (truncated && matches.length === 0) throw new Error('CSS selector uniqueness scan exceeded the safe node limit.');
-        return matches;
-      })()`,
-      contextId,
-      returnByValue: false,
-    },
-    sessionId,
-  );
-  const exception = recordValue(collection.exceptionDetails);
-  if (exception) return yield* browserFailure(new Error(exceptionDescription(exception)));
-  return yield* collectionElements(send, stringValue(recordValue(collection.result)?.objectId), sessionId, limit);
+          if (truncated && matches.length === 0) throw new Error('CSS selector uniqueness scan exceeded the safe node limit.');
+          return matches;
+        })()`,
+        contextId,
+        returnByValue: false,
+      },
+      sessionId,
+    ).pipe(
+      Effect.catch((failure) => (contexts.length > 1 && contextId !== contexts[0] ? Effect.succeed(null) : Effect.fail(failure))),
+    );
+    if (!collection) continue;
+    const exception = recordValue(collection.exceptionDetails);
+    if (exception) {
+      if (contexts.length > 1 && contextId !== contexts[0]) continue;
+      for (const objectId of collected) {
+        yield* send("Runtime.releaseObject", { objectId }, sessionId).pipe(Effect.ignore);
+      }
+      return yield* browserFailure(new Error(exceptionDescription(exception)));
+    }
+    const items = yield* collectionElements(
+      send,
+      stringValue(recordValue(collection.result)?.objectId),
+      sessionId,
+      remaining,
+    );
+    collected.push(...items);
+  }
+  return collected;
 });
 
 /** The first elements of a page array, as objects that the caller releases. The array is released. */
@@ -643,71 +692,88 @@ export const visibleTextObjectMatches = Effect.fn("Browser.visibleTextObjectMatc
   limit = MAX_TARGET_CANDIDATES,
 ) {
   yield* browserSync(() => assertBeforeDeadline(deadline));
-  const contextId = yield* automationContextId(send, capture.sessionId);
-  const collection = yield* send(
-    "Runtime.evaluate",
-    {
-      expression: `(() => {
-        const roles = new Set(${JSON.stringify([...ACTIONABLE_ROLES])});
-        const needle = ${JSON.stringify(target.text.trim().toLocaleLowerCase())};
-        const exact = ${target.exact === true};
-        const roots = [document];
-        const seenRoots = new Set();
-        const matches = [];
-        let scanned = 0;
-        let truncated = false;
-        const isCandidate = node => {
-          if (node.nodeType !== 1) return false;
-          const explicitRole = (node.getAttribute('role') || '').trim().split(/\\s+/)[0].toLowerCase();
-          const tag = node.localName;
-          const semantic = tag === 'button' || tag === 'summary' || (tag === 'a' && node.hasAttribute('href')) ||
-            tag === 'select' || tag === 'textarea' || (tag === 'input' && node.type !== 'hidden') || node.isContentEditable;
-          if (!semantic && !roles.has(explicitRole)) return false;
-          return node.getClientRects().length > 0;
-        };
-        while (roots.length && matches.length < ${limit}) {
-          if (scanned >= ${MAX_SNAPSHOT_SCANNED_NODES}) {
-            truncated = true;
-            break;
-          }
-          const root = roots.shift();
-          if (!root || seenRoots.has(root)) continue;
-          seenRoots.add(root);
-          const walker = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT, ${SKIP_HIDDEN_SUBTREES});
-          while (matches.length < ${limit}) {
-            const node = walker.nextNode();
-            if (!node) break;
+  const contexts = yield* captureContextIds(send, capture.sessionId);
+  const collected: string[] = [];
+  for (const contextId of contexts) {
+    const remaining = limit - collected.length;
+    if (remaining <= 0) break;
+    const collection = yield* send(
+      "Runtime.evaluate",
+      {
+        expression: `(() => {
+          const roles = new Set(${JSON.stringify([...ACTIONABLE_ROLES])});
+          const needle = ${JSON.stringify(target.text.trim().toLocaleLowerCase())};
+          const exact = ${target.exact === true};
+          const roots = [...${ACTIVE_MODAL_ROOTS_SNIPPET}, document];
+          const seenRoots = new Set();
+          const matches = [];
+          let scanned = 0;
+          let truncated = false;
+          const isCandidate = node => {
+            if (node.nodeType !== 1) return false;
+            const explicitRole = (node.getAttribute('role') || '').trim().split(/\\s+/)[0].toLowerCase();
+            const tag = node.localName;
+            const semantic = tag === 'button' || tag === 'summary' || (tag === 'a' && node.hasAttribute('href')) ||
+              tag === 'select' || tag === 'textarea' || (tag === 'input' && node.type !== 'hidden') ||
+              (tag === 'label' && Boolean(node.control)) || node.isContentEditable;
+            if (!semantic && !roles.has(explicitRole)) return false;
+            return node.getClientRects().length > 0;
+          };
+          while (roots.length && matches.length < ${remaining}) {
             if (scanned >= ${MAX_SNAPSHOT_SCANNED_NODES}) {
               truncated = true;
               break;
             }
-            scanned++;
-            if (node.shadowRoot) roots.push(node.shadowRoot);
-            if (node.localName === 'iframe' || node.localName === 'frame') {
-              try { if (node.contentDocument) roots.push(node.contentDocument); } catch {}
+            const root = roots.shift();
+            if (!root || seenRoots.has(root)) continue;
+            seenRoots.add(root);
+            const walker = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT, ${SKIP_HIDDEN_SUBTREES});
+            while (matches.length < ${remaining}) {
+              const node = walker.nextNode();
+              if (!node) break;
+              if (scanned >= ${MAX_SNAPSHOT_SCANNED_NODES}) {
+                truncated = true;
+                break;
+              }
+              scanned++;
+              if (node.shadowRoot) roots.push(node.shadowRoot);
+              if (node.localName === 'iframe' || node.localName === 'frame') {
+                try { if (node.contentDocument) roots.push(node.contentDocument); } catch {}
+              }
+              if (!isCandidate(node)) continue;
+              const value = String(node.innerText ?? node.textContent ?? '').replace(/\\s+/g, ' ').trim().toLocaleLowerCase();
+              if (exact ? value === needle : value.includes(needle)) matches.push(node);
             }
-            if (!isCandidate(node)) continue;
-            const value = String(node.innerText ?? node.textContent ?? '').replace(/\\s+/g, ' ').trim().toLocaleLowerCase();
-            if (exact ? value === needle : value.includes(needle)) matches.push(node);
+            if (truncated) break;
           }
-          if (truncated) break;
-        }
-        if (truncated && matches.length < 2) throw new Error('Semantic target uniqueness scan exceeded the safe node limit.');
-        return matches;
-      })()`,
-      contextId,
-      returnByValue: false,
-    },
-    capture.sessionId,
-  );
-  const exception = recordValue(collection.exceptionDetails);
-  if (exception) return yield* browserFailure(new Error(exceptionDescription(exception)));
-  return yield* collectionElements(
-    send,
-    stringValue(recordValue(collection.result)?.objectId),
-    capture.sessionId,
-    limit,
-  );
+          if (truncated && matches.length < 2) throw new Error('Semantic target uniqueness scan exceeded the safe node limit.');
+          return matches;
+        })()`,
+        contextId,
+        returnByValue: false,
+      },
+      capture.sessionId,
+    ).pipe(
+      Effect.catch((failure) => (contexts.length > 1 && contextId !== contexts[0] ? Effect.succeed(null) : Effect.fail(failure))),
+    );
+    if (!collection) continue;
+    const exception = recordValue(collection.exceptionDetails);
+    if (exception) {
+      if (contexts.length > 1 && contextId !== contexts[0]) continue;
+      for (const objectId of collected) {
+        yield* send("Runtime.releaseObject", { objectId }, capture.sessionId).pipe(Effect.ignore);
+      }
+      return yield* browserFailure(new Error(exceptionDescription(exception)));
+    }
+    const items = yield* collectionElements(
+      send,
+      stringValue(recordValue(collection.result)?.objectId),
+      capture.sessionId,
+      remaining,
+    );
+    collected.push(...items);
+  }
+  return collected;
 });
 
 /** What tells the candidates of an ambiguous target apart. */
@@ -837,6 +903,7 @@ const collectActionableNodesEffect = Effect.fn("Browser.collectActionableNodes")
     role: string;
     name: string;
     visibleText: string;
+    isFileInput?: boolean;
   }> = [];
   const batchSize = MAX_SNAPSHOT_ELEMENTS;
   const collection = yield* send(
@@ -893,14 +960,17 @@ const collectActionableNodesEffect = Effect.fn("Browser.collectActionableNodes")
             const node = recordValue(description.node);
             const backendNodeId = numberValue(node?.backendNodeId);
             if (!node || !backendNodeId) return null;
+            const isFileInput =
+              (stringValue(node.localName) || stringValue(node.nodeName)).toLowerCase() === "input" &&
+              nodeAttributes(node.attributes).type === "file";
             const axNodes = Array.isArray(partialAxTree.nodes) ? partialAxTree.nodes.filter(isRecord) : [];
             const ax =
               axNodes.find((candidate) => numberValue(candidate.backendDOMNodeId) === backendNodeId) ?? axNodes[0];
-            if (!drawnOnly && (!ax || ax.ignored === true)) return null;
+            if (!drawnOnly && !isFileInput && (!ax || ax.ignored === true)) return null;
             const visibleText = stringValue(recordValue(visibleTextResult.result)?.value);
             const { role, name } = controlIdentity(node, ax, visibleText);
             if (!ACTIONABLE_ROLES.has(role)) return null;
-            return { backendNodeId, node, ax: ax ?? {}, role, name, visibleText };
+            return { backendNodeId, node, ax: ax ?? {}, role, name, visibleText, ...(isFileInput ? { isFileInput } : {}) };
           }),
         ),
         { concurrency: "unbounded" },
@@ -927,8 +997,9 @@ const collectActionableNodesEffect = Effect.fn("Browser.collectActionableNodes")
 function actionableNodesExpression(limit: number, rule: HiddenSubtreeRule): string {
   return `(() => {
     const roles = new Set(${JSON.stringify([...ACTIONABLE_ROLES])});
-    const roots = [document];
+    const roots = [...${ACTIVE_MODAL_ROOTS_SNIPPET}, document];
     const seenRoots = new Set();
+    const seenCandidates = new Set();
     // Controls in the viewport come first: on a long page, the controls above the scroll position
     // would otherwise fill the budget. Offscreen controls fill what is left.
     const inView = [];
@@ -944,16 +1015,31 @@ function actionableNodesExpression(limit: number, rule: HiddenSubtreeRule): stri
       if (node.nodeType !== 1) return false;
       const explicitRole = (node.getAttribute('role') || '').trim().split(/\\s+/)[0].toLowerCase();
       const tag = node.localName;
+      if (tag === 'input' && node.type === 'file') return true;
       const semantic = tag === 'button' || tag === 'summary' || (tag === 'a' && node.hasAttribute('href')) ||
         tag === 'select' || tag === 'textarea' || (tag === 'input' && node.type !== 'hidden') || node.isContentEditable;
       if (!semantic && !roles.has(explicitRole)) return false;
       return node.getClientRects().length > 0;
+    };
+    const pushNode = (node) => {
+      if (seenCandidates.has(node)) return;
+      seenCandidates.add(node);
+      if ((node.localName === 'input' && node.type === 'file') || isInView(node)) inView.push(node);
+      else if (outside.length < limit) outside.push(node);
     };
     const limit = ${Math.max(0, limit)};
     while (roots.length && scanned < ${MAX_SNAPSHOT_SCANNED_NODES} && inView.length < limit) {
       const root = roots.shift();
       if (!root || seenRoots.has(root)) continue;
       seenRoots.add(root);
+      // Hidden <input type="file"> inputs inside React/dropzone portals are often styled with display:none
+      // or opacity:0, which skipHiddenSubtrees would skip. Collect them so upload_files can target them directly.
+      try {
+        for (const fileInput of root.querySelectorAll('input[type="file"]')) {
+          if (inView.length >= limit) break;
+          pushNode(fileInput);
+        }
+      } catch {}
       const walker = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT, ${skipHiddenSubtrees(rule)});
       let node;
       while ((node = walker.nextNode()) && scanned < ${MAX_SNAPSHOT_SCANNED_NODES} && inView.length < limit) {
@@ -963,8 +1049,7 @@ function actionableNodesExpression(limit: number, rule: HiddenSubtreeRule): stri
           try { if (node.contentDocument) roots.push(node.contentDocument); } catch {}
         }
         if (!isCandidate(node)) continue;
-        if (isInView(node)) inView.push(node);
-        else if (outside.length < limit) outside.push(node);
+        pushNode(node);
       }
     }
     return [...inView, ...outside].slice(0, limit);
@@ -1018,7 +1103,7 @@ export function fallbackRole(node: CdpResult): string {
   if (attributes.type === "radio") return "radio";
   if (attributes.type === "range") return "slider";
   if (attributes.type === "number") return "spinbutton";
-  if (["button", "submit", "reset", "image"].includes(attributes.type ?? "")) return "button";
+  if (["button", "submit", "reset", "image", "file"].includes(attributes.type ?? "")) return "button";
   return "textbox";
 }
 
@@ -1031,13 +1116,15 @@ export function controlIdentity(
   ax: CdpResult | undefined,
   visibleText: string,
 ): { role: string; name: string } {
+  const attributes = nodeAttributes(node.attributes);
   if (ax && ax.ignored !== true) {
     return { role: axValue(ax.role).toLowerCase() || fallbackRole(node), name: axValue(ax.name).slice(0, 500) };
   }
-  const attributes = nodeAttributes(node.attributes);
   const role = fallbackRole(node);
   const value = stringValue(node.localName) === "input" && role === "button" ? attributes.value || attributes.alt : "";
-  const name = attributes["aria-label"] || visibleText || value || attributes.placeholder || attributes.title || "";
+  const fileFallback = attributes.type === "file" ? attributes.name || attributes.id || "Choose File" : "";
+  const name =
+    attributes["aria-label"] || visibleText || value || attributes.placeholder || attributes.title || fileFallback;
   return { role, name: name.slice(0, 500) };
 }
 
