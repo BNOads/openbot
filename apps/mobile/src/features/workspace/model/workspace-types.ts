@@ -186,6 +186,7 @@ import type {
   WorkflowWebhookSecret,
 } from "@openbot/contracts/ipc";
 import type {
+  AgentWebhookSecret,
   EventActivity,
   EventRoutine,
   EventRoutineOwner,
@@ -798,6 +799,8 @@ export interface MobileWorkspaceContextValue {
   canRelayMcpSignIn: (serverId: string) => boolean;
   /** The host is not a Mac (`mac-apps-limit-v1`), so an app that drives Apple apps does not run there. */
   macAppsUnavailable: (serverId: string) => boolean;
+  /** The host reads an edited confirm preview (`ui-block-preview-edit-v1`), so the card can edit it. */
+  canEditUiBlockPreview: (serverId: string) => boolean;
   /** The relayed browser sign-ins of MCP servers on one host. Refuses a host without `sign-in-relay-v1`. */
   mcpSignInRelay: (serverId: string) => McpSignInRelay;
   /** The http servers that the host holds a sign-in for. Empty for a host without `mcp-sign-in-v1`. */
@@ -840,6 +843,8 @@ export interface MobileWorkspaceContextValue {
   canManageMissedRuns: (serverId: string) => boolean;
   /** An owner or admin of a host with `routine-results-v1`: an agent routine can send its answers on. */
   canManageRoutineResults: (serverId: string) => boolean;
+  /** An owner or admin of a host with `webhook-agent-secret-v1`: an agent can get its routine's secret. */
+  canGiveWebhookSecretToAgent: (serverId: string) => boolean;
   /** The host's enabled messaging connections, with the places that each one can post in. */
   loadRoutineResultOptions: (serverId: string) => Promise<RoutineResultConnectionOption[]>;
   loadRoutineResultDestination: (
@@ -857,6 +862,8 @@ export interface MobileWorkspaceContextValue {
   deleteEventRoutine: (input: EventRoutineRef, serverId: string) => Promise<void>;
   testEventRoutine: (input: EventRoutineRef, serverId: string) => Promise<void>;
   rotateEventRoutineSecret: (input: EventRoutineRef, serverId: string) => Promise<WebhookSecret>;
+  /** Gives a new signing secret to the routine's agent as an API key. The result has only the key name. */
+  giveEventRoutineSecretToAgent: (input: EventRoutineRef, serverId: string) => Promise<AgentWebhookSecret>;
   listEventActivity: (input: ListEventActivityInput, serverId: string) => Promise<EventActivity[]>;
   loadAgentModels: (serverId: string) => Promise<AgentModelOption[]>;
   loadAgentMemorySelection: (agentId: string, serverId: string) => Promise<AgentMemorySelectionState | null>;
@@ -1354,12 +1361,14 @@ type ServerCheckKey =
   | "canManageMcpServers"
   | "canRelayMcpSignIn"
   | "macAppsUnavailable"
+  | "canEditUiBlockPreview"
   | "canManageMcpAccess"
   | "canAddMarketplaceAgents"
   | "canUpdateMarketplaceAgents"
   | "canManageEvents"
   | "canManageMissedRuns"
   | "canManageRoutineResults"
+  | "canGiveWebhookSecretToAgent"
   | "canManageAgentSkills"
   | "canManageSharedTables"
   | "canManageAgentFolders"

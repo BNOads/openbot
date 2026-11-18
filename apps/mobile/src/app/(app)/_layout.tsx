@@ -21,6 +21,7 @@ import { HomeOnboardingProvider, useHomeOnboarding } from "@/features/onboarding
 import type { NotificationTarget } from "@/features/push-notifications/push-notifications-native.types";
 import { useNotificationTaps } from "@/features/push-notifications/use-notification-taps";
 import type { QuickActionTarget } from "@/features/quick-actions/model/quick-action-items";
+import { shareOpenBot } from "@/features/quick-actions/model/share-app";
 import { setQuickActionNavigator } from "@/features/quick-actions/quick-actions-native";
 import { requestHomeSearch } from "@/features/search/model/home-search-request";
 import { AppDrawerShell, useAppDrawer } from "@/features/servers/components/app-drawer-shell";
@@ -164,10 +165,16 @@ function AuthenticatedStack() {
         return;
       }
       whenUnlocked(() => {
+        // The share sheet opens over the current screen, so the user keeps their place.
+        if (target.type === "share") {
+          shareOpenBot();
+          return;
+        }
         closeDrawer();
         if (router.canDismiss()) router.dismissAll();
         if (target.type === "routines")
           router.push({ pathname: "/server-routines", params: { serverId: target.serverId } });
+        else if (target.type === "support") router.push("/settings/support");
         else requestHomeSearch();
       });
     },
@@ -316,6 +323,21 @@ function AuthenticatedStack() {
       })}
     >
       <Stack.Screen name="connected" options={{ animation: "fade", gestureEnabled: false, title: "" }} />
+      {/* The ask shows over home: the bloub stage drops its header, and the screen slides its panel out
+          from under the edge. The route must stay inside the navigation container, below the stage:
+          a native `transparentModal` draws over the stage, covers its edge and takes the touches of
+          its close button. The close button, "Not now" and Back close the panel before the route
+          leaves, so a swipe is off. */}
+      <Stack.Screen
+        name="rate-app"
+        options={{
+          presentation: "containedTransparentModal",
+          animation: "none",
+          gestureEnabled: false,
+          headerShown: false,
+          contentStyle: { backgroundColor: "transparent" },
+        }}
+      />
       <Stack.Screen
         name="chat/[agentId]"
         options={{

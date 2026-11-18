@@ -8,6 +8,7 @@ import type {
 } from "@openbot/contracts/ipc";
 import {
   COMPUTER_USE_MCP_SERVER_NAME,
+  isReservedMcpServerName,
   MCP_ELICITATION_DECISION_QUESTION_ID,
   vaultExpiryText,
 } from "@openbot/contracts/ipc";
@@ -15,6 +16,7 @@ import { type DynamicRecord, isString } from "@openbot/contracts/runtime-values"
 import {
   normalizeUiBlockSpec,
   UI_API_KEY_SCOPE_FIELD_ID,
+  UI_CONFIRM_EDIT_ACTION_ID,
   UI_VAULT_REQUEST_FIELDS,
   UI_VAULT_SECRET_FIELDS,
   type UiBlockResponse,
@@ -203,8 +205,19 @@ function mcpSignInPageQuestion(params: unknown, serverName: string | null): Agen
   };
 }
 
+/**
+ * The server that asks, with the name the user gave it. Codex names an OpenBot server by its key,
+ * which has `openbot_` in front (`codexMcpServerKey`). OpenBot's own browser server keeps its name,
+ * and so does a user's server that would then pass as Codex's own `codex_apps`.
+ */
+function elicitationServerName(params: unknown): string | null {
+  const name = getString(params, "serverName")?.trim() || null;
+  const shown = name?.startsWith("openbot_") ? name.slice("openbot_".length) : name;
+  return shown && name && !isReservedMcpServerName(name) && shown !== CODEX_APPS_MCP_SERVER_NAME ? shown : name;
+}
+
 export function mcpElicitationQuestions(params: unknown): AgentPromptQuestion[] | null {
-  const serverName = getString(params, "serverName");
+  const serverName = elicitationServerName(params);
   const mode = getString(params, "mode") ?? "form";
   const requestedSchema = getRecord(params, "requestedSchema");
   const properties = getRecord(requestedSchema, "properties");
@@ -230,7 +243,7 @@ const CODEX_APPS_MCP_SERVER_NAME = "codex_apps";
  * `_meta._codex_apps.connector_auth_failure.connector_name`.
  */
 export function declinedMcpElicitationText(params: unknown): string {
-  const serverName = getString(params, "serverName")?.trim() || null;
+  const serverName = elicitationServerName(params);
   const signIn = getString(params, "mode") === "url";
   if (serverName === CODEX_APPS_MCP_SERVER_NAME) {
     const authFailure = getRecord(getRecord(getRecord(params, "_meta"), "_codex_apps"), "connector_auth_failure");
@@ -473,17 +486,30 @@ export function userMessagePromptResult(
 
 /** What a blocking UI block (`ask_ui`) ended with. */
 export type UiBlockPromptOutcome =
-  | { status: "answered"; blockId: string; response: UiBlockResponse }
+  | { status: "answered"; blockId: string; response: UiBlockResponse; preview?: string | undefined }
   | { status: "skipped" | "expired"; blockId: string };
 
 /**
  * The `ask_ui` result. Only the model reads it: the ids it gave, the values, and the user's words when
- * the user answered in text. An expired block is a failed call, as an expired question is.
+ * the user answered in text, or the preview that the user edited. An expired block is a failed call, as
+ * an expired question is.
  */
 export function uiBlockPromptResult(outcome: UiBlockPromptOutcome): DynamicToolResult {
   const value =
     outcome.status === "answered"
-      ? { status: outcome.status, blockId: outcome.blockId, ...outcome.response }
+      ? {
+          status: outcome.status,
+          blockId: outcome.blockId,
+          ...outcome.response,
+          ...(outcome.preview
+            ? {
+                preview: outcome.preview,
+                next: "The user edited the preview. For the chosen action, use this text exactly, not your draft.",
+              }
+            : outcome.response.actionId === UI_CONFIRM_EDIT_ACTION_ID
+              ? { next: "The user wants changes to the preview. Ask what to change." }
+              : {}),
+        }
       : outcome.status === "expired"
         ? {
             status: outcome.status,

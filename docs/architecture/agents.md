@@ -62,7 +62,9 @@ it finds the marker by its text. When a turn that ran only quiet routine runs co
 answer is the marker, or the agent called the tool and the turn gave no file, image or question, the
 turn drops its markers, thinking and plan from the conversation. Each other text answer stays with the
 item type `routine_quiet_answer`. A quiet answer does not count as unread, does not change the agent
-preview, and no Team API client gets it; the desktop chat shows it under its run, which starts closed.
+preview, and only a Team API client with `routine-quiet-answers-v1` gets it; the desktop chat and the web
+client show it under its run, which starts closed. `history_read` marks it `quiet`, so the agent does not
+say that the user saw it.
 The turn puts back the agent preview from
 before the run (the run start shows the task there; memory only, so after a restart the task stays),
 and its `turn-completed`
@@ -88,7 +90,9 @@ the agent sent its result to that teammate with `send_message` (`quietTeammateTu
 The turn does not need `routine_no_update`, and the prompt does not name it: Claude often does not
 load the tool, which waits behind its tool search. When only answered requests started the turn and
 its answers are text alone, that text repeats the reply, so it becomes quiet answers as after the tool
-call. A file, an image or a question keeps the whole turn in the chat. The tool still accepts a
+call. A file, an image or a question keeps the whole turn in the chat. So the request prompt tells the
+agent that the user does not see its written answer, and to ask the user with `ask_user`, whose
+question card keeps the turn shown (#11012). The tool still accepts a
 request: before the reply it answers that the agent must send the result first, but only when the
 missing reply is all that keeps the turn from a quiet end. When the agent sends no reply, OpenBot
 sends the turn's answer to the teammate as its result when the turn ends (`#relayAgentResult`). The
@@ -108,7 +112,16 @@ answers it names those turns (`continues` on `turn/started`). When each of them 
 turn can end quiet in the same way: the no-update tool accepts the call, and its text answers become
 quiet answers (#10847). Work that ends while that turn runs goes to it too
 (`openbot/turn-continues`). Work of a person's request, or of an unknown turn, keeps the answer in
-the chat. The lifecycle keeps the newest quiet turns in memory only, so after a restart such a turn shows.
+the chat. That answer is the first one after the request. Work that a turn of the provider's own
+started can end quiet too, so a watcher that a person started and that wakes again does not post each
+time; a result that the agent writes without the no-update call still shows (#11090). On the first
+answer after a person's request, the tool returns `shown`, not a refusal: after a refusal, the model
+did not call the tool on the later wakes. The CLI wakes the model with its own prompt, which does not
+name the tool, so a Claude agent always loads the tool (not behind the tool search) and its developer
+instructions say when a wake needs no answer. The model decides: in tests, Sonnet called the tool on
+a wake with nothing new, and Haiku often wrote a status line instead. The lifecycle
+keeps the newest quiet turns and the newest such turns in memory only, so after a restart such a turn
+shows.
 
 A completed turn that a teammate's message started (`origin: "agent"`: a request from another agent,
 or its answer) is work between agents. Its answer shows in the chat and counts as unread, but the
@@ -621,7 +634,7 @@ the phone read the profiles again on `browser-profiles-changed` (`browser-profil
 A side thread (in code and on the wire still a **task**) is a separate execution thread of one agent.
 The agent keeps one identity, workspace and provider settings; each side thread has its own provider
 thread, conversation, queue, progress and result. The agent's own chat is its main thread and has no
-side thread row. `projection_agent_threads` (`src/backend/agent-threads/agent-thread-schema.ts`,
+side thread row. `projection_agent_threads` (`src/backend/agent-threads/agent-thread-store.ts`,
 migration 47) holds one row for each side thread, with its title and the source of the title
 (`auto`, `agent` or `user`). Migration 47 moved every task of `projection_agent_tasks` (migration 38)
 there: a closed task became an archived thread, and the task id stays as `legacy_task_id`. The task id
@@ -1000,7 +1013,10 @@ WhatsApp do not steer automatically: each starts a turn of its own. A question b
 expects a reply) asks for no `send_message` reply, so it stays queued and its own turn's answer goes
 back. Channel, messaging and task work, and each answer to a request that went to two or more teammates, stay queued
 (`MailboxStore.joinsChatTurn`), so those answers still start together. A message from an agent that
-cannot steer gets no fallback reason on its row.
+cannot steer gets no fallback reason on its row. A message from an agent also stays queued while a
+turn that only the person's messages started runs, and starts as a turn of its own after it: the tools
+that only a person's message can start check each message of the turn, and a message from an agent
+in the person's turn would make them refuse the person's own request (#11165).
 The person can steer any queued answer into the running turn from the waiting block on desktop, the
 web and mobile; it has no other queue action. That is the person's choice, so it can take one answer
 of a group before the others.
@@ -1067,6 +1083,8 @@ model or an unsupported effort is an error that names the valid values; OpenBot 
 it creates the agent. Without a provider and a model, the new agent starts on the calling agent's
 provider, model and reasoning effort, so a team that one agent creates runs where that agent runs.
 When the caller's provider no longer lists its model, the new agent starts on the user's default.
+When that provider lists no model now, or the caller is a custom agent, the call fails and asks the
+caller to try again or to name a model: an empty or partial list is no proof that the model is gone (#11033).
 Creation stays this small. The calling agent then configures the new agent, or any other local
 agent, with the same tools that act on itself. `openbot.read_agent` returns one agent's setup:
 profile, runtime, access, Computer Use, notifications, auto-approve, installed skills, routines,
