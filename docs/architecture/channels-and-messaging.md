@@ -290,8 +290,29 @@ lead routes it. A channel without a lead refuses a request that names nobody
 post as an agent. The tool call id gives the operation id, so a retried call posts no second
 message. Inside a channel task, `send_to_channel` is refused; use `channel_assign` or
 `channel_transfer`. It is also refused in an external chat thread and in a turn that answers a
-teammate request from one (`answersMessagingRequest`): no channel result comes back, so the person
-would get no answer (#6160). The agent asks the members with `send_message`, whose answers come back. On desktop, a person can do the same by hand: "Send to channel" on a message of
+teammate request from one (`answersMessagingRequest`): the channel result comes back to the agent,
+not to the external chat, so the person would get no answer (#6160).
+
+The result of each root task comes back to the sending agent as a teammate reply
+(`ChannelRequestReturns`). When a root task of an `agent:<agentId>` request becomes completed,
+failed, cancelled or paused, the channel `changed` hook queues one mailbox message from the task owner (or
+the lead) to that agent, with `replyToMessageId` set to the channel request id and
+`expectsReply: false`. The text names the channel and gives the `channel_result` of the newest
+assignment of the task, or else the newest completed answer after the request, with its attachments.
+A failed or cancelled task gives a blocked note with the task error. A paused task (a person
+stopped it, or OpenBot paused it) gives a paused note that tells the agent not to send the request
+again: when the task continues and finishes, a new result comes back. A paused note is not sent
+when the task already sent a note and did not run again, so archive or Stop on a failed or paused
+task sends nothing. When a person continues the task, its request message changes, so the return
+finds the request in the newest `agent:<agentId>` message of the task sources and replies to it. The idempotency key holds the task id, revision and state, so a task that is resumed and
+finishes again sends a new result. At start, the tasks that are already finished are marked as
+handled, so an upgrade or a restart sends no old results. A send that fails is reported
+(`channel_request_return_failed`) and is not tried again. The reply goes to the main chat of the
+agent, also when it sent the request from a side task. No result is sent when the owner is the
+sender, or when one of the two agents was deleted. When the lead moves a request into an open
+task, the request message gets the `taskId` of that task, and the cancelled routing task (it has
+no owner) sends nothing; the open task sends the result. Each member task of a request with more
+than one recipient has an owner, so each one sends its own result. The agent asks the members with `send_message`, whose answers come back. On desktop, a person can do the same by hand: "Send to channel" on a message of
 an agent chat opens the channel with the message text in its composer. Attachments stay behind.
 
 A workflow output with the target `chat-channel` posts its result as a note (`ChannelService.postNote`).
@@ -388,7 +409,9 @@ stopping. Webhook routines still need the agent's own chat.
 Channel work holds only the agent that does it. Each channel has its own mailbox lane
 (`channelLane(channelId)`, from `StoredMessage.channelId`), and its execution thread is a side thread
 in `ConversationRuntime`. So a channel turn runs beside the agent's own chat and its messaging
-deliveries, as a task turn does (#4761). It gets the side-thread guidance and no Computer Use. An
+deliveries, as a task turn does (#4761). It gets the side-thread guidance. It keeps Computer Use
+when the agent has it on, so a channel task can drive a desktop app without a step in the own chat.
+The channel turn and the own chat can then drive the screen at the same time, as two agents can. An
 agent runs one channel turn at a time over all channels: the scheduler holds the other channel lanes
 (`channel-turn`), and the channel `busy` hook starts no second assignment while one is active. The
 work of other agents does not hold it. A channel turn takes no task slot. When the provider of the
@@ -864,7 +887,15 @@ is one linked number (`workspace_id` is the number in digits).
   own posts not read back. A closed socket follows `closeDecision`: 401, 403 and 411 stop with
   `invalid_token` (the user links again); 440 stops with `error` (another client has the session;
   Reconnect takes it back); 515 restarts at once; others retry with backoff from 2 to 30 seconds with
-  jitter. A watchdog reconnects a socket that is silent for 90 seconds. Posts wait up to 5 minutes
+  jitter. A watchdog reconnects a socket that is silent for 90 seconds. Keep-alive replies do not
+  prove that WhatsApp still delivers messages: a Baileys handler that stalls holds its ack, and
+  WhatsApp then holds the messages (Baileys issue #2491). So the vendored Baileys reports when each
+  node handler starts and ends (`openbot:node`), and the session also reconnects when a handler runs
+  for 5 minutes. The first socket after a link is not checked: its history and app-state sync can take
+  that long. After the third stalled handler in an hour, the session drops the socket and shows
+  `error` until Reconnect or a wake of the computer. When WhatsApp does not confirm a post within 10
+  seconds after the send, and no other post waits for its ack, the session reconnects too; this does
+  not count as a stall. Posts wait up to 5 minutes
   for the socket, keep at least a second between posts to one chat, and get their message id before
   the send, so an echo in the owner's own chat is never read as a request.
 - **Link.** `WhatsAppConnect` pairs a new device in a new store (QR code, or a pairing code for a
@@ -894,8 +925,11 @@ is one linked number (`workspace_id` is the number in digits).
   and its copy, and an edit changes the text, only when the sender is the saved `author_id`: the sender
   chooses the message id. A group admin's delete of another person's message is not followed. `MessagingService` deletes the rows and copies older than 90 days at start and
   each hour, also those of a number that is off; a disconnect deletes all of them for the connection.
-- **Not on joined servers.** `connectors-v1` and `routine-results-v1` stay as released: a host leaves
-  WhatsApp out of both, and the desktop IPC endpoints `messaging:*-whatsapp-*` are local only.
+- **Joined servers.** `connectors-v1` and `routine-results-v1` stay as released: a host leaves
+  WhatsApp out of both, and the desktop IPC endpoints `messaging:*-whatsapp-*` are local only. A client
+  that sends `routine-results-whatsapp-v1` also gets the WhatsApp numbers in the routine-results
+  options, so a routine or a workflow on a joined server can send to WhatsApp. A client without it
+  gets `destination: null` for a WhatsApp destination.
 
 ## Mobile chat queue
 

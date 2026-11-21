@@ -81,58 +81,42 @@ import {
 import { createComposerRowsResize } from "../conversation/createComposerRowsResize";
 import { TasksEmptyBoard, TasksEmptyPitch } from "./TasksEmpty";
 
-/** The microphone of the Tasks composer. The page shows it; the app records and transcribes. */
 export interface TasksVoice {
   phase: VoicePhase;
   levels: readonly number[];
   elapsedSeconds: number;
-  /** The words the recording heard so far. */
   liveText: string;
-  /** The download progress of the voice model, in percent, while the phase is "preparing". */
   modelProgress: number | null;
   onStart: () => void;
   onCancel: () => void;
   onFinish: () => void;
-  /** True while another message box on the page records. */
   blocked?: boolean | undefined;
 }
 
-/** The task of the last start, in the line under the composer. */
 interface TasksTook {
   task: AgentTask;
-  /** True while the start waits: Undo cancels it, and the agent can change. */
   pending: boolean;
 }
 
 interface TasksPageProps {
   hostName: string;
   onBack?: (() => void) | undefined;
-  /** In the app window, the header has no Back button and no server name. */
   frame?: PageHeaderFrame | undefined;
   agents: AgentProfile[];
-  /** The tasks of all agents, also a start that waits. */
   tasks: readonly AgentTask[];
-  /** Whether the task lists of all agents loaded. Only then does a page with no task show how tasks work. */
   loaded?: boolean | undefined;
-  /** The agent of the next task. */
   agentId: string;
   onAgentChange: (agentId: string) => void;
   draft: string;
   onDraftChange: (text: string) => void;
-  /** The files of the next task. The text names each one where it was added. */
   files?: readonly DraftAttachment[] | undefined;
-  /** The files in the thumbnail row: each image, and each other file that the text no longer names. */
   rowFiles?: readonly DraftAttachment[] | undefined;
-  /** The pasted images that still import, with their local previews. */
   pendingImages?: readonly ComposerPendingImage[] | undefined;
   onRemoveFile?: ((attachment: DraftAttachment) => void) | undefined;
-  /** Receives pasted files and long text pastes, as `ComposerEditor` says. Without it, a file paste does nothing here. */
   onPasteFiles?:
     | ((files: File[], selection: ComposerSelection, text?: string) => Promise<ComposerPasteResult | undefined>)
     | undefined;
-  /** Each change moves the focus to the composer. */
   focusRequest: number;
-  /** The text of a start that failed. The draft is back in the composer. */
   startError: string | null;
   onDismissStartError: () => void;
   onStart: () => void;
@@ -142,18 +126,12 @@ interface TasksPageProps {
   onUndo: () => void;
   onOpenTook: () => void;
   onDismissTook: () => void;
-  /** The task in the side panel. */
   selectedId: string | null;
   onSelect: (taskId: string | null) => void;
-  /** The conversation of one task, for the side panel. */
   panel: (taskId: string) => JSX.Element;
-  /** The width of the side panel that the user chose, in pixels. A narrow page shows it narrower. */
   sideWidth: number;
-  /** Each move of the side panel edge. */
   onSideResize: (width: number) => void;
-  /** The width at the end of a move, to keep for the next visit. */
   onSideResizeEnd: (width: number) => void;
-  /** What the task's running turn waits for from the person: an approval, or an answer in the chat. */
   waitOf?: ((task: AgentTask) => AgentTaskWait) | undefined;
   /** Waiting approvals across all agents/threads. */
   approvals?: readonly AgentApproval[] | undefined;
@@ -190,7 +168,6 @@ interface TasksPageProps {
   onOpenInChat?: ((task: AgentTask) => void) | undefined;
   /** The user's send shortcut for the composer. */
   sendShortcut?: SendShortcut | undefined;
-  /** The window draws the macOS window controls over the image viewer's top start corner. */
   macWindowControls?: boolean | undefined;
 }
 

@@ -44,7 +44,7 @@ cd "$PROJECT_ROOT"
 if [ "$FROM_UI" = "true" ]; then
   exec >> /tmp/openbot-fork-update.log 2>&1
   echo "===================================================="
-  echo "[$(date -Is)] Atualização acionada pelo botão Reiniciar do OpenBot"
+  echo "[$(date '+%Y-%m-%dT%H:%M:%S%z')] Atualização acionada pelo botão Reiniciar do OpenBot"
   notify "Atualizando OpenBot (oficial + suas melhorias)..."
   sleep 2
 fi
@@ -61,6 +61,13 @@ if ! git merge upstream/main -X ours --no-edit; then
   git checkout --ours . || true
   git add -A
   git commit --no-verify --no-edit || true
+fi
+# Garante que a versão de package.json acompanhe o upstream após o merge (-X ours pode reter versão antiga)
+UPSTREAM_VERSION="$(git show upstream/main:package.json 2>/dev/null | node -e 'try { console.log(JSON.parse(require("fs").readFileSync(0,"utf8")).version || "") } catch {}' || true)"
+LOCAL_VERSION="$(node -e 'console.log(require("./package.json").version || "")' 2>/dev/null || true)"
+if [ -n "$UPSTREAM_VERSION" ] && [ "$UPSTREAM_VERSION" != "$LOCAL_VERSION" ]; then
+  node -e 'const fs=require("fs");const p=JSON.parse(fs.readFileSync("package.json","utf8"));p.version=process.argv[1];fs.writeFileSync("package.json",JSON.stringify(p,null,2)+"\n");' "$UPSTREAM_VERSION"
+  git add package.json && git commit --no-verify -m "chore: sync version $UPSTREAM_VERSION from upstream" || true
 fi
 
 echo "==> 3. Garantindo dependências atualizadas..."
@@ -94,4 +101,4 @@ echo "==> 7. Atualizando a VPS ($VPS_HOST) com backup automático e zero perda d
 
 UPDATE_OK="true"
 notify "OpenBot atualizado no Mac e na VPS com sucesso!"
-echo "==> [$(date -Is)] Tudo atualizado com sucesso (Oficial + Suas Melhorias no Mac e na VPS)!"
+echo "==> [$(date '+%Y-%m-%dT%H:%M:%S%z')] Tudo atualizado com sucesso (Oficial + Suas Melhorias no Mac e na VPS)!"
