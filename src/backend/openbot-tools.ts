@@ -332,7 +332,7 @@ export const OPENBOT_TOOL_DEFINITIONS: readonly OpenBotToolDefinition[] = [
   {
     name: "list_library_folders",
     description:
-      "List your Library folders by path, with the id, name and stored path of each file in them, and your files in no folder. Pass folder to list one folder and the folders in it. Change folders and move files with organize_library.",
+      "List your Library folders by path, with the id, name and stored path of each file in them, your files in no folder, and workflow files. Pass folder to list one folder. Change folders and move files with organize_library.",
     shape: listLibraryFoldersToolSchema.shape,
   },
   {
@@ -697,6 +697,7 @@ export const OPENBOT_TOOL_DEFINITIONS: readonly OpenBotToolDefinition[] = [
               )
               .max(INPUT_LIMITS.promptOptions)
               .optional(),
+            multiSelect: z.boolean().optional(),
           }),
         )
         .min(1)

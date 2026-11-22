@@ -217,6 +217,7 @@ interface AcpTurn {
   signInLost: boolean;
   failureCause: CauseCode | null;
   accountLink: string | null;
+  accountVerification: boolean;
   sessionLost: boolean;
   sdkFailureAt: number | null;
   retryNotices: string;
@@ -376,6 +377,16 @@ export const OPENBOT_ACP_CLIENT_CAPABILITIES = {
 
 export const OPENBOT_ACP_CLIENT_INFO = { name: "openbot", title: "OpenBot", version: "0.1.0" } as const;
 
+const START_MODELS_PARAM = "openbotStartModels";
+
+export function withStartModels(params: unknown): DynamicRecord {
+  return { ...(isRecord(params) ? params : {}), [START_MODELS_PARAM]: true };
+}
+
+function asksForStartModels(params: unknown): boolean {
+  return isRecord(params) && params[START_MODELS_PARAM] === true;
+}
+
 export interface AcpSavedSignInCheck {
   refusedAfterEmptyAnswer(model: string | null): Effect.Effect<"lasting" | "turn" | null>;
   refusedAtStart(): Effect.Effect<boolean>;
@@ -418,6 +429,7 @@ export interface AcpProviderOptions {
   ): Effect.Effect<void, ProviderClientOperationError>;
   savedKeyRefusedMessage?: () => string | null;
   savedKeyLimitMessage?: (detail: string, error?: unknown) => string | null;
+  readVerificationLink?: () => Effect.Effect<string | null>;
   authBlockedMessage?: () => string | null;
   savedSignInCheck?: AcpSavedSignInCheck;
   readAccount?(
@@ -722,6 +734,10 @@ export class AcpAgentClient extends EventEmitter<ClientEvents> {
     return this.options.label ?? agentProviderName(this.provider);
   }
 
+  #readVerificationLink(): Effect.Effect<string | null> {
+    return this.options.readVerificationLink?.() ?? Effect.succeed(null);
+  }
+
   #redact(text: string): string {
     let result = redactText(text);
     for (const value of this.options.redactValues?.() ?? []) {
@@ -881,11 +897,16 @@ export class AcpAgentClient extends EventEmitter<ClientEvents> {
 
   canReleaseProcess(): boolean {
     if (this.#threads.ids().next().done) return true;
+    if (this.runsBackgroundWork()) return false;
+    return this.#supportsSessionResume || this.#loadsSessions;
+  }
+
+  runsBackgroundWork(): boolean {
     for (const id of this.#threads.ids()) {
       const thread = this.#threads.get(id);
-      if (thread && (thread.workHold || this.#heldByBackgroundSubagent(thread))) return false;
+      if (thread && (thread.workHold || this.#heldByBackgroundSubagent(thread))) return true;
     }
-    return this.#supportsSessionResume || this.#loadsSessions;
+    return false;
   }
 
   callRelayedMcpTool(
@@ -1113,7 +1134,7 @@ export class AcpAgentClient extends EventEmitter<ClientEvents> {
         }
       case "model/list":
         yield* this.#ensureInitializedEffect();
-        if (this.#signedIn) {
+        if (this.#signedIn && !asksForStartModels(params)) {
           try {
             const models = providerResult(yield* Effect.result(this.#discoverModels(timeoutMs)));
             if (models.length === 0 && this.#flavor.keepModelsOnRefreshFailure && !this.options.allowNoModels)
@@ -2400,6 +2421,7 @@ export class AcpAgentClient extends EventEmitter<ClientEvents> {
       signInLost: false,
       failureCause: null,
       accountLink: null,
+      accountVerification: false,
       sessionLost: false,
       sdkFailureAt: null,
       retryNotices: "",
@@ -2599,13 +2621,14 @@ export class AcpAgentClient extends EventEmitter<ClientEvents> {
           turn.text = failure ? turn.text.slice(0, failureAt) : "";
           if (!((turn.receivedOutput || turn.answerOptional) && sdkHarness.emptyOutputFailure?.test(detail))) {
             turn.accountLink = sdkHarness.accountLink?.(detail, this.options.argv, thread.id) ?? null;
+            turn.accountVerification =
+              turn.accountLink !== null || sdkHarness.accountVerification?.test(detail) === true;
             const rawCause = classifyFailure(detail);
-            turn.failureCause =
-              turn.accountLink || sdkHarness.accountVerification?.test(detail)
-                ? "authentication"
-                : rawCause === "unknown"
-                  ? (sdkHarness.fallbackCause?.(detail) ?? rawCause)
-                  : rawCause;
+            turn.failureCause = turn.accountVerification
+              ? "authentication"
+              : rawCause === "unknown"
+                ? (sdkHarness.fallbackCause?.(detail) ?? rawCause)
+                : rawCause;
             turn.providerError =
               this.#mcpLoadFailureMessage(thread, detail) ??
               this.options.savedKeyLimitMessage?.(detail) ??
@@ -3966,6 +3989,10 @@ export class AcpAgentClient extends EventEmitter<ClientEvents> {
     this.#completeMessage(thread, turn, "final_answer", failureReport);
     if (status === "failed" && error) {
       const detail = this.#redact(failureText(error));
+      if (turn.accountVerification || this.#flavor.sdkHarness?.accountVerification?.test(detail)) {
+        turn.accountLink = (yield* this.#readVerificationLink()) ?? turn.accountLink;
+        turn.failureCause ??= "authentication";
+      }
       const message =
         this.options.savedKeyLimitMessage?.(detail, error) ??
         this.#flavor.turnFailure?.(
@@ -4156,13 +4183,12 @@ export class AcpAgentClient extends EventEmitter<ClientEvents> {
           ? "file-change"
           : "permissions";
     if (
-      kind === "permissions" &&
       thread &&
       turn &&
       !turn.stopped &&
       !turn.completing &&
-      ((this.options.confine && callsBridgeTool(thread, params.toolCall.title)) ||
-        (turn.quietNoUpdate && callsNoUpdateTool(thread, params.toolCall.title)))
+      ((this.options.confine && callsBridgeTool(thread, params.toolCall, kind, this.#flavor.mcpCallInputNamesServer)) ||
+        (kind === "permissions" && turn.quietNoUpdate && callsNoUpdateTool(thread, params.toolCall.title)))
     ) {
       const option = params.options.find((candidate) => candidate.kind === "allow_once");
       if (option) return { outcome: { outcome: "selected", optionId: option.optionId } };
@@ -4462,9 +4488,25 @@ function bestPermissionOption(options: PermissionOption[], accepted: boolean): P
   return kinds.flatMap((kind) => options.filter((option) => option.kind === kind))[0] ?? null;
 }
 
-function callsBridgeTool(thread: AcpThread, title: string | null | undefined): boolean {
+function callsBridgeTool(
+  thread: AcpThread,
+  toolCall: RequestPermissionRequest["toolCall"],
+  kind: "command" | "file-change" | "permissions",
+  inputNamesServer: true | undefined,
+): boolean {
+  const input = isRecord(toolCall.rawInput) ? toolCall.rawInput : null;
+  if (kind === "file-change" || (input && Object.hasOwn(input, "CommandLine"))) return false;
+  if (inputNamesServer && input && Object.hasOwn(input, "ServerName"))
+    return thread.dynamicTools.some(
+      (namespace) =>
+        namespace.name === input.ServerName && namespace.tools.some((tool) => tool.name === input.ToolName),
+    );
+  if (kind !== "permissions") return false;
+  const title = toolCall.title?.trim().replace(/\?$/u, "");
   return thread.dynamicTools.some((namespace) =>
-    namespace.tools.some((tool) => title === `${namespace.name}__${tool.name}`),
+    namespace.tools.some(
+      (tool) => title === `${namespace.name}__${tool.name}` || title === `Run mcp_${namespace.name}_${tool.name}`,
+    ),
   );
 }
 
