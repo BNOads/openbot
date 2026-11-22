@@ -87,18 +87,31 @@ if ! "$SCRIPT_DIR/update-mac-app.sh"; then
 fi
 
 if [ "$FROM_UI" = "true" ]; then
-  echo "==> 5. Reabrindo /Applications/OpenBot.app..."
-  open -a /Applications/OpenBot.app
-  REOPENED="true"
-  notify "Mac atualizado! Sincronizando GitHub e VPS..."
+  notify "Mac compilado! Atualizando GitHub e VPS antes de reabrir..."
 fi
 
-echo "==> 6. Salvando no seu GitHub (BNOads/openbot)..."
+echo "==> 5. Salvando no seu GitHub (BNOads/openbot)..."
 git push --no-verify origin main || true
 
-echo "==> 7. Atualizando a VPS ($VPS_HOST) com backup automático e zero perda de dados..."
-"$SCRIPT_DIR/deploy-vps.sh" "$VPS_HOST" || true
+echo "==> 6. Atualizando a VPS ($VPS_HOST) com backup automático e zero perda de dados..."
+VPS_OK="true"
+if ! "$SCRIPT_DIR/deploy-vps.sh" "$VPS_HOST"; then
+  VPS_OK="false"
+  echo "!! Falha ao atualizar a VPS ($VPS_HOST); verifique os logs."
+fi
 
-UPDATE_OK="true"
-notify "OpenBot atualizado no Mac e na VPS com sucesso!"
-echo "==> [$(date '+%Y-%m-%dT%H:%M:%S%z')] Tudo atualizado com sucesso (Oficial + Suas Melhorias no Mac e na VPS)!"
+if [ "$FROM_UI" = "true" ]; then
+  echo "==> 7. Reabrindo /Applications/OpenBot.app..."
+  open -a /Applications/OpenBot.app
+  REOPENED="true"
+fi
+
+if [ "$VPS_OK" = "true" ]; then
+  UPDATE_OK="true"
+  notify "OpenBot atualizado no Mac e na VPS com sucesso!"
+  echo "==> [$(date '+%Y-%m-%dT%H:%M:%S%z')] Tudo atualizado com sucesso (Oficial + Suas Melhorias no Mac e na VPS)!"
+else
+  notify "Mac atualizado! Falha ao atualizar a VPS (veja /tmp/openbot-fork-update.log)."
+  echo "==> [$(date '+%Y-%m-%dT%H:%M:%S%z')] Mac atualizado, mas houve falha na VPS."
+  exit 1
+fi
