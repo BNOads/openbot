@@ -88,7 +88,9 @@ import {
   promptInstructionsFile,
 } from "./workspace-instructions";
 import {
+  type CodexApprovalPolicy,
   checkAgentFolders,
+  codexApprovalPolicy,
   codexSandboxConfig,
   codexSandboxMode,
   existingAgentFolders,
@@ -104,6 +106,8 @@ const NO_CODEX_OWN_SERVERS: CodexOwnServers = { disabled: {}, transports: {}, re
 
 const RUNTIME_RELOADED_ON_RESUME: ReadonlySet<AgentProvider> = new Set(["claude"]);
 
+export type RuntimeRefreshTiming = "now" | "after-background-work";
+
 type CodexToolApprovals = Array<[string, DynamicRecord]>;
 const SESSION_NAME_PREFIX = "OpenBot · ";
 
@@ -114,13 +118,23 @@ interface InstructionsFileInPrompt {
   hiddenFromCli: AgentInstructionFileName[];
 }
 
-const CODEX_TOOLS_CONFIG = { update_plan: { enabled: true } } as const;
+const CODEX_TOOLS_CONFIG = {
+  update_plan: { enabled: true },
+  experimental_request_user_input: { enabled: false },
+} as const;
 
 export const CODEX_FEATURES_CONFIG = { "features.goals": false, "features.request_permissions_tool": false } as const;
 
 const CODEX_COMPUTER_USE_PLUGINS_OFF = {
   "plugins.computer-use@openai-bundled.enabled": false,
   "plugins.unified-computer-use@openai-bundled.enabled": false,
+} as const;
+
+const CODEX_BROWSER_PLUGINS_OFF = {
+  "plugins.browser@openai-bundled.enabled": false,
+  "plugins.chrome@openai-bundled.enabled": false,
+  "plugins.chrome-dev@openai-bundled.enabled": false,
+  "plugins.chrome-internal@openai-bundled.enabled": false,
 } as const;
 
 const CODEX_MCP_STARTUP_GRACE_MS = 10_000;
@@ -164,6 +178,7 @@ export interface ThreadLifecycleOptions {
   branchThread?: (threadId: string) => boolean;
   importedHistory?: (threadId: string) => boolean;
   routineThread?: (threadId: string) => boolean;
+  asksFirst?: (agentId: string) => boolean;
 }
 
 export class ThreadLifecycle {
@@ -197,6 +212,7 @@ export class ThreadLifecycle {
   readonly #branchThread: (threadId: string) => boolean;
   readonly #importedHistory: (threadId: string) => boolean;
   readonly #routineThread: (threadId: string) => boolean;
+  readonly #asksFirst: (agentId: string) => boolean;
   readonly #pendingHandoffs = new Map<string, string>();
   readonly #givenTurnContext = new Map<string, string>();
   readonly #handoffWrites = Semaphore.makeUnsafe(1);
@@ -239,6 +255,11 @@ export class ThreadLifecycle {
     this.#branchThread = options.branchThread ?? (() => false);
     this.#importedHistory = options.importedHistory ?? (() => false);
     this.#routineThread = options.routineThread ?? (() => false);
+    this.#asksFirst = options.asksFirst ?? (() => false);
+  }
+
+  approvalPolicy(agent: Pick<AgentSummary, "id" | "access">): CodexApprovalPolicy {
+    return codexApprovalPolicy(agent, this.#asksFirst(agent.id));
   }
 
   #toolRuntimes(): McpToolRuntimes {
@@ -261,10 +282,11 @@ export class ThreadLifecycle {
 
   readonly refreshAllAgentRuntimes = Effect.fn("ThreadLifecycle.refreshAllAgentRuntimes")(function* (
     this: ThreadLifecycle,
+    timing: RuntimeRefreshTiming,
   ) {
     for (const agent of this.#store.list()) {
       this.#pendingRuntimeRefreshes.add(agent.id);
-      this.#mcpRuntimeRefreshes.add(agent.id);
+      if (timing === "now") this.#mcpRuntimeRefreshes.add(agent.id);
       yield* this.applyPendingRuntimeRefresh(agent);
     }
   }, Effect.uninterruptible).bind(this);
@@ -621,7 +643,7 @@ export class ThreadLifecycle {
       effort: agent.reasoningEffort,
       cwd: agent.workspacePath,
       runtimeWorkspaceRoots: workspaceWritableRoots(agent, this.#store.sharedRoot),
-      approvalPolicy: "on-request",
+      approvalPolicy: this.approvalPolicy(agent),
       approvalsReviewer: "user",
       sandbox: codexSandboxMode(agent),
       ...this.#workspaceOnlyParam(agent, client),
@@ -815,6 +837,7 @@ export class ThreadLifecycle {
         "features.code_mode.direct_only_tool_namespaces": string[];
         [variable: `shell_environment_policy.set.${string}`]: string;
       } & CodexPromptSettings &
+        typeof CODEX_BROWSER_PLUGINS_OFF &
         Partial<typeof CODEX_COMPUTER_USE_PLUGINS_OFF> &
         ReturnType<typeof codexSandboxConfig>;
     },
@@ -833,6 +856,7 @@ export class ThreadLifecycle {
         tools: CODEX_TOOLS_CONFIG,
         ...CODEX_FEATURES_CONFIG,
         ...codexPromptSettings(own.read),
+        ...CODEX_BROWSER_PLUGINS_OFF,
         ...(agentComputerUseEnabled(agent) ? {} : CODEX_COMPUTER_USE_PLUGINS_OFF),
         project_doc_max_bytes: AGENT_INSTRUCTIONS_FILE_BYTES,
         mcp_optional_startup_grace_ms: CODEX_MCP_STARTUP_GRACE_MS,
@@ -1173,7 +1197,10 @@ export class ThreadLifecycle {
               client.provider === "antigravity"
               ? mcpServers
                   .filter((config) => mcpFallbackRunsServer(config, agent))
-                  .map((config) => providerMcpServerName(config.name))
+                  .map(
+                    (config) =>
+                      client.sessionMcpServerName?.(config, agent.workspacePath) ?? providerMcpServerName(config.name),
+                  )
               : [],
       catalogAsMcpTools: client.catalogAsMcpTools?.(agent.model) === true,
       ...(client.provider === "antigravity" ? { toolCatalog: toolCatalogNames(client.provider) } : {}),
@@ -1269,7 +1296,7 @@ export class ThreadLifecycle {
       effort: agent.reasoningEffort,
       cwd: agent.workspacePath,
       runtimeWorkspaceRoots: workspaceWritableRoots(agent, this.#store.sharedRoot),
-      approvalPolicy: "on-request",
+      approvalPolicy: this.approvalPolicy(agent),
       approvalsReviewer: "user",
       sandbox: codexSandboxMode(agent),
       ...this.#workspaceOnlyParam(agent, client),

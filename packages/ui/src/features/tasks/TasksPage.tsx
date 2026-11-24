@@ -337,7 +337,7 @@ function TasksComposer(props: TasksPageProps) {
             <Show when={props.voice} fallback={send()}>
               {(voice) => (
                 <>
-                  <Show when={phase() === "preparing"}>
+                  <Show when={phase() === "preparing" && voice().modelProgress !== null}>
                     <span class="voice-model-progress" role="status">
                       {t("composer.voice.progress", { progress: voice().modelProgress ?? 0 })}
                     </span>
@@ -355,7 +355,7 @@ function TasksComposer(props: TasksPageProps) {
                       type="button"
                       variant="ghost"
                       class="dictation-button"
-                      aria-label={t(voiceButtonLabel(phase()))}
+                      aria-label={t(voiceButtonLabel(phase(), voice().modelProgress))}
                       disabled={busy() || voice().blocked === true}
                       onClick={() => voice().onStart()}
                     >

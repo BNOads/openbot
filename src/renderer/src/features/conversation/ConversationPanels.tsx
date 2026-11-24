@@ -42,7 +42,7 @@ import { cycleSpeechSpeed, speechSpeed } from "../speech/speech-speed";
 import { openedAttachmentUrl } from "./attachment-preview";
 import { ConversationSideThread } from "./ConversationSideThread";
 import { isChatVisualAppShortcut } from "./chat-visual-shortcuts";
-import { htmlAttachmentPageHtml, htmlAttachmentPageUrl } from "./chat-visual-url";
+import { htmlAttachmentPageUrl, htmlFilePageHtml } from "./chat-visual-url";
 import { useConversationController } from "./conversation-controller-context";
 import { type AgentNotificationLevelCalls, conversationRuntime } from "./conversation-runtime";
 import { useConversationViewScope } from "./conversation-scope";
@@ -67,11 +67,16 @@ import {
   remoteAgentFolderCalls,
 } from "./agent-folders-port";
 import { conversationPort } from "./conversation-port";
+import { conversationOwnerId } from "./stores/composer-store";
 
 function VoiceConversationPane(pill: VoicePillPresence) {
   const controller = useConversationController();
-  const { props } = useConversationViewScope();
-  const running = untrack(() => (props.agent ? controller.voiceSessions.running(props.agent.id) : null));
+  const { props, channel } = useConversationViewScope();
+  const running = untrack(() => {
+    const ownerId = conversationOwnerId(props);
+    return ownerId ? controller.voiceSessions.running(ownerId) : null;
+  });
+  if (channel) return <VoiceConversation kind={running ?? "transcribed"} open={pill.open} onClosed={pill.onClosed} />;
   const runtimeLive = untrack(() => props.runtime?.liveVoice);
   if (runtimeLive) {
     const liveKind: VoiceConversationKind = running ?? "codex-live";
@@ -104,8 +109,8 @@ interface VoicePillPresence {
 
 function VoiceConversation(paneProps: VoicePillPresence & { kind: VoiceConversationKind; port?: CodexLivePort }) {
   const controller = useConversationController();
-  const { props, startVoiceConversation, endVoiceConversation } = useConversationViewScope();
-  const agentId = untrack(() => props.agent?.id);
+  const { props, channel, startVoiceConversation, endVoiceConversation } = useConversationViewScope();
+  const agentId = untrack(() => conversationOwnerId(props));
   if (!agentId) return null;
   const serverId = untrack(() => props.server?.id ?? LOCAL_SERVER_ID);
   const kind = untrack(() => paneProps.kind);
@@ -121,8 +126,9 @@ function VoiceConversation(paneProps: VoicePillPresence & { kind: VoiceConversat
   const transcribed = kind === "transcribed";
   const replySpeed = () => (transcribed ? speechSpeed() : undefined);
   const cycleSpeed = transcribed ? cycleSpeechSpeed : undefined;
+  const pillAgent = () => (channel ? channel.voiceAgent() : props.agent);
   return (
-    <Show when={props.agent}>
+    <Show when={pillAgent()}>
       {(agent) => (
         <VoicePill
           agent={agent()}
@@ -130,6 +136,7 @@ function VoiceConversation(paneProps: VoicePillPresence & { kind: VoiceConversat
           muted={conversation.muted()}
           levels={conversation.levels()}
           error={conversation.error()}
+          downloadProgress={conversation.downloadProgress()}
           onToggleMute={conversation.toggleMute}
           talkMode={talkMode()}
           onTalkModeChange={setVoiceTalkMode}
@@ -193,6 +200,7 @@ export function ConversationPanels(panelProps: { onOpenUsage?: ((trigger: HTMLBu
     sidebarFilePreview,
     settingsOpen,
     skillSettingsRequest,
+    clearSkillSettingsRequest,
     instructionsSettingsRequest,
     agentSettingRowRequest,
     handleAgentSettingRowRequest,
@@ -236,8 +244,11 @@ export function ConversationPanels(panelProps: { onOpenUsage?: ((trigger: HTMLBu
     replyJump,
   } = useConversationViewScope();
   const { t, errorMessage } = useText();
-  const chatAgentKey = () => (props.agent ? `${props.server?.id ?? "local"}:${props.agent.id}` : null);
-  const voiceKey = () => (voiceConversationOpen() && !channel && chatAgentKey()) || null;
+  const chatAgentKey = () => {
+    const ownerId = conversationOwnerId(props);
+    return ownerId ? `${props.server?.id ?? "local"}:${ownerId}` : null;
+  };
+  const voiceKey = () => (voiceConversationOpen() && chatAgentKey()) || null;
   const [voicePill, setVoicePill] = createSignal<{ key: string } | null>(null);
   const [voicePillClosing, setVoicePillClosing] = createSignal(false);
   createEffect(
@@ -436,10 +447,16 @@ export function ConversationPanels(panelProps: { onOpenUsage?: ((trigger: HTMLBu
   const panelSubagent = createMemo(() => {
     const subagentId = panelSubagentId();
     if (!subagentId) return undefined;
-    for (let index = props.messages.length - 1; index >= 0; index -= 1) {
-      const found = props.messages[index]?.subagents?.find((subagent) => subagent.id === subagentId);
-      if (found) return found;
-    }
+    const threads = props.threads;
+    const sideMessages = (threads?.side.tabs ?? []).map(
+      (tab) => threads?.side.thread(tab.id)?.conversation?.messages ?? [],
+    );
+    const openThreadMessages = threads?.conversation?.messages ?? [];
+    for (const messages of [props.messages, openThreadMessages, ...sideMessages])
+      for (let index = messages.length - 1; index >= 0; index -= 1) {
+        const found = messages[index]?.subagents?.find((subagent) => subagent.id === subagentId);
+        if (found) return found;
+      }
     return undefined;
   });
   const sidePanelMaxWidth = () => settingsPanelMaxWidth(conversationPanelElement());
@@ -558,6 +575,8 @@ export function ConversationPanels(panelProps: { onOpenUsage?: ((trigger: HTMLBu
             onClose: closePanelThread,
             onMove: moveSideThread,
             onToChat: movePanelThreadToChat,
+            onArchive: props.threads?.header.onArchive,
+            onDelete: props.threads?.header.onDelete,
           }}
           files={{
             items: sidePanel().files,
@@ -614,7 +633,7 @@ export function ConversationPanels(panelProps: { onOpenUsage?: ((trigger: HTMLBu
                 onBack={sidebarFileBack() === null ? undefined : openSidebarFileBack}
                 sourceUrl={openedAttachmentUrl(attached()?.previewUrl)}
                 pageUrl={htmlAttachmentPageUrl(attached()) ?? file().preview?.pageUrl}
-                pageHtml={props.runtime?.visualPage ? htmlAttachmentPageHtml(attached(), file().preview) : undefined}
+                pageHtml={props.runtime?.visualPage ? htmlFilePageHtml(attached(), file().preview) : undefined}
                 fileKey={previewFileKey()}
                 selectionQuoteId={previewQuoteId()}
                 onPageQuote={(text) => {
@@ -883,6 +902,7 @@ export function ConversationPanels(panelProps: { onOpenUsage?: ((trigger: HTMLBu
               onUpdateRuntimeSettings={updateRuntimeSettings}
               onSetAgentAvatar={props.onSetAgentAvatar}
               skillSelectionRequest={skillSettingsRequest()?.agentId === agent().id ? skillSettingsRequest() : null}
+              onSkillsClosed={() => clearSkillSettingsRequest(agent().id)}
               instructionsRequest={
                 instructionsSettingsRequest()?.agentId === agent().id ? instructionsSettingsRequest() : null
               }

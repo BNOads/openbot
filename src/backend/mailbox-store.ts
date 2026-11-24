@@ -1127,7 +1127,7 @@ export class MailboxStore {
     });
   }
 
-  awaitsTeammate(agentId: string, taskId: string | null, turnIds: ReadonlySet<string>): boolean {
+  awaitsTeammate(agentId: string, taskId: string | null, turnIds: ReadonlySet<string> | null): boolean {
     const messages = this.#messagesById();
     const sourceTurnIds = this.#sourceTurnIds();
     return this.#state.deliveries.some((delivery) => {
@@ -1139,7 +1139,7 @@ export class MailboxStore {
         request.sender.agentId === agentId &&
         request.expectsReply !== false &&
         (request.senderTaskId ?? null) === taskId &&
-        turnIds.has(sourceTurnIds.get(request.id) ?? "") &&
+        (turnIds === null || turnIds.has(sourceTurnIds.get(request.id) ?? "")) &&
         (!held || this.heldByTask(delivery.recipientAgentId, request.id))
       );
     });
@@ -2098,11 +2098,11 @@ export class MailboxStore {
       .map((delivery) => delivery.recipientAgentId);
   }
 
-  joinsChatTurn(deliveryId: string): boolean {
+  joinsRunningTurn(deliveryId: string): boolean {
     const delivery = this.#state.deliveries.find((candidate) => candidate.id === deliveryId);
     if (delivery?.status !== "queued") return false;
     const message = this.#requireMessage(delivery.messageId);
-    if (message.channelId || message.messaging || message.taskId) return false;
+    if (message.channelId || message.messaging) return false;
     if (message.replyToMessageId !== null && message.expectsReply !== false) return false;
     return (
       !isAnswer(message) ||

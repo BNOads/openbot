@@ -5,6 +5,7 @@ import { createOpenBotLogger } from "@openbot/logging";
 import type { CauseCode } from "@openbot/telemetry";
 import { type AcpCustomEndpoint, type AcpFlavor, type AcpRetryCause, shownFailureDetail } from "./acp-flavor";
 import {
+  isContextTooSmallFailure,
   isImageCountDiagnostic,
   isImageTooLargeDiagnostic,
   isImageTooSmallDiagnostic,
@@ -29,6 +30,12 @@ const OPENCODE_RETRY_TYPES: ReadonlyMap<string, boolean> = new Map([
   ["provider.transport", true],
 ]);
 
+const TEXT_TOOL_CALL_TAG = String.raw`(?:[\w.-]+:|[|｜]DSML[|｜])?(?:function_calls?|tool_calls?|invoke)`;
+const TEXT_TOOL_CALL_ENDING = new RegExp(
+  String.raw`(?:^|\n)[ \t]*(?:<${TEXT_TOOL_CALL_TAG}\b[^>]*>[\s\S]*</${TEXT_TOOL_CALL_TAG}>|<｜tool▁calls▁begin｜>[\s\S]*<｜tool▁calls▁end｜>|\[Assistant tool call\]:[ \t]*[\w.-]+\([\s\S]*\))\s*$`,
+  "u",
+);
+
 const OPENCODE_OUT_OF_MEMORY = /\bout of memory\b|\binsufficient memory\b|\bmemory limit exceeded\b/iu;
 
 function openCodeRetryUpdate(update: SessionUpdate): { attempt: number; cause: AcpRetryCause } | null {
@@ -46,7 +53,7 @@ function openCodeRetryUpdate(update: SessionUpdate): { attempt: number; cause: A
   return { attempt: Math.max(1, retry.attempt - 1), cause };
 }
 
-function isOpenCodeStarting(error: unknown): boolean {
+export function isOpenCodeStarting(error: unknown): boolean {
   return (
     error instanceof RequestError &&
     error.code === -32603 &&
@@ -58,6 +65,8 @@ function isOpenCodeStarting(error: unknown): boolean {
 function isOpenCodeServiceFailure(error: unknown): boolean {
   return error instanceof RequestError && error.code === -32603 && /\bOpenCode service failure\b/.test(error.message);
 }
+
+const OPENCODE_PROMPT_MEDIA_BASE64_BYTES = 8 * 1024 * 1024;
 
 export const OPENCODE_INTERNAL_FAILURE = "Internal error: Internal service failure";
 
@@ -103,11 +112,16 @@ function openCodeAuthRequired(
     : sourceText("error.provider.opencodeAuthRequired", { provider });
 }
 
-const OPENCODE_CONTEXT_TOO_SMALL =
-  /\bcannot be reduced further without losing the latest exchange\b|\bnothing to compact yet\b|\bgreater than the context length\b|\bexceeds the available context size\b|\bexceed_context_size_error\b|\bcontext_length_exceeded\b/iu;
-
 const NVIDIA_MODEL_NOT_SERVED = /\bFunction '[^']*': Not found for account\b/u;
 const NVIDIA_MODEL_DEGRADED = /\bDEGRADED function cannot be invoked\b/iu;
+const NVIDIA_SAFETY_SCREENING = /\binput rejected by content safety screening\b/iu;
+
+function isOpenCodeSafetyRefusal(error: unknown): boolean {
+  return (
+    error === "refusal" ||
+    (error instanceof RequestError && error.code === -32603 && NVIDIA_SAFETY_SCREENING.test(error.message))
+  );
+}
 
 function isReasoningEffortRefusal(error: unknown): boolean {
   if (!(error instanceof RequestError) || error.code !== -32603) return false;
@@ -144,6 +158,10 @@ function openCodeRequestFailure(
   log: (text: string) => void,
   endpoint: AcpCustomEndpoint | null,
 ): string {
+  if (isOpenCodeSafetyRefusal(error)) {
+    logger.warn("A model provider's safety rules refused an OpenCode turn.", { detail });
+    return sourceText("error.provider.opencodeSafetyBlocked");
+  }
   if (!(error instanceof RequestError) || error.code !== -32603) return detail;
   const reason = error.message.replace(/^Internal error:\s*/u, "");
   if (isRecord(error.data) && error.data.errorName === "provider.free-limit")
@@ -169,7 +187,7 @@ function openCodeRequestFailure(
     logger.warn("A model server ran out of memory for an OpenCode request.", { reason: redact(reason) });
     return sourceText("error.provider.opencodeOutOfMemory");
   }
-  if (OPENCODE_CONTEXT_TOO_SMALL.test(reason)) {
+  if (isContextTooSmallFailure(reason)) {
     log(`OpenCode request does not fit the model's context window: ${reason}`);
     return sourceText("error.provider.opencodeContextTooSmall");
   }
@@ -182,7 +200,7 @@ function openCodeRequestFailure(
   const errorName = isRecord(error.data) ? error.data.errorName : undefined;
   const key =
     OPENCODE_REQUEST_FAILURES.find(([, pattern]) => pattern.test(reason))?.[0] ??
-    (errorName === "provider.internal"
+    (errorName === "provider.internal" || errorName === "provider.unknown"
       ? "error.provider.opencodeProviderFailed"
       : errorName === "provider.no-route"
         ? "error.provider.opencodeModelUnavailable"
@@ -214,6 +232,7 @@ const OPENCODE_ERROR_CAUSES: Readonly<Record<string, CauseCode>> = {
 
 function openCodeFailureCause(error: unknown): CauseCode | null {
   if (!(error instanceof RequestError)) return null;
+  if (isOpenCodeSafetyRefusal(error)) return "content_blocked";
   if (NVIDIA_MODEL_NOT_SERVED.test(error.message)) return "model_not_found";
   if (NVIDIA_MODEL_DEGRADED.test(error.message)) return "provider_unavailable";
   if (!isRecord(error.data)) return null;
@@ -251,6 +270,9 @@ export const OPENCODE_ACP_FLAVOR: AcpFlavor = {
   serverLost: isOpenCodeServerLost,
   emptyAnswerFailure: ({ reasoned }) =>
     sourceText(reasoned ? "error.provider.opencodeReasoningWithoutAnswer" : "error.provider.opencodeNoAnswer"),
+  textToolCallFailure: (answer) =>
+    TEXT_TOOL_CALL_ENDING.test(answer) ? sourceText("error.provider.opencodeToolCallsAsText") : null,
+  stillStarting: isOpenCodeStarting,
   restoreFailure: (error, method) => {
     if (method === "resume" && isOpenCodeStarting(error)) return "wait-for-start";
     return isOpenCodeServiceFailure(error) ? "list-sessions" : null;
@@ -266,6 +288,8 @@ export const OPENCODE_ACP_FLAVOR: AcpFlavor = {
   messagePerId: true,
   mcpServersPerDirectory: true,
   mcpConnectLimitMs: 30_000,
+  openToolStallMs: 30 * 60_000,
   relayStdioMcpServers: true,
   childSessionUpdates: true,
+  promptMediaBase64Bytes: OPENCODE_PROMPT_MEDIA_BASE64_BYTES,
 };
