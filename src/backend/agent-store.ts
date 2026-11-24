@@ -1579,6 +1579,14 @@ export class AgentStore {
       provider: DEFAULT_AGENT_PROVIDER,
       model: DEFAULT_AGENT_MODEL,
       reasoningEffort: DEFAULT_REASONING_EFFORT,
+      backupModels: {
+        automatic: true,
+        order: [
+          { provider: "codex", model: "gpt-6.1-sol" },
+          { provider: "claude", model: "claude-sonnet-5-5" },
+          { provider: "codex", model: "gpt-6-sol" },
+        ],
+      },
       access: DEFAULT_AGENT_ACCESS,
       computerUse: true,
       threadId: null,
