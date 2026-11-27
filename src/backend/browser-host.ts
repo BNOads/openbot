@@ -2426,10 +2426,17 @@ export class BrowserHost {
     let shownDialogId: string | null | undefined;
     const reportDialog = () => {
       const open = dialogEngine.dialog;
-      const dialog = open && !tab.secret?.submitted && !tab.filledCard && !tab.secretShown ? open : undefined;
+      const dialog =
+        open &&
+        (open.type === "alert" || open.type === "confirm") &&
+        !tab.secret?.submitted &&
+        !tab.filledCard &&
+        !tab.secretShown
+          ? { id: open.id, type: open.type, message: open.message }
+          : null;
       if ((dialog?.id ?? null) === shownDialogId) return;
       shownDialogId = dialog?.id ?? null;
-      onDialog?.(dialog ? { id: dialog.id, type: dialog.type, message: dialog.message } : null);
+      onDialog?.(dialog);
     };
     const stopDialog = onDialog ? dialogEngine.onDialogChange(reportDialog) : () => undefined;
     const stopEvents = () => {

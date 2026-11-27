@@ -15,6 +15,7 @@ import type {
   ConversationSnapshot,
   DraftAttachment,
   QueueSnapshot,
+  ResponseStyle,
 } from "@openbot/contracts/ipc";
 import type { AppTextKey } from "@openbot/i18n";
 import { plainTaskTitle, taskApproval } from "@openbot/team-client/agent-tasks";

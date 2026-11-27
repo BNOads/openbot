@@ -50,6 +50,7 @@ export interface BrowserFullViewProps {
   detached?: boolean;
   onBack: () => void;
   onEnterPip: () => void;
+  onOpenWindow?: (() => void) | undefined;
   /** Toggles manual user control ("Assumir Navegador" / "Devolver ao Bot") on the active tab. */
   onToggleUserControl?: ((tab: BrowserTab) => void) | undefined;
   /** Sends a quick natural-language command to the active tab's agent (releasing user control if held). */
