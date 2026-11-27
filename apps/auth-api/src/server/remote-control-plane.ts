@@ -48,6 +48,11 @@ import {
   type RemoteTicketClaims,
 } from "@openbot/contracts/signal-protocol/ticket";
 import {
+  WATCH_TICKET_AUDIENCE,
+  WATCH_TICKET_TTL_SECONDS,
+  type WatchTicketClaims,
+} from "@openbot/contracts/signal-protocol/watch-relay";
+import {
   WEBHOOK_ROUTE_AUDIENCE,
   WEBHOOK_ROUTE_ID_PATTERN,
   WEBHOOK_ROUTE_TTL_SECONDS,
@@ -164,6 +169,7 @@ interface MemberSeat {
 interface MemberLimit {
   readonly limit: number;
   readonly fromLicense: boolean;
+  readonly licenseRaises: boolean;
 }
 
 const JOINED_NOW_SQL = `EXISTS(
@@ -411,6 +417,29 @@ export class RemoteTicketSigner {
         .setIssuedAt(issuedAt)
         .setExpirationTime(expiresAt)
         .setAudience(REMOTE_TICKET_AUDIENCE)
+        .sign(signingKey),
+    );
+    return { ticket, expiresAt: expiresAt * 1_000 };
+  }).bind(this);
+
+  readonly issueWatch = Effect.fn("RemoteTicketSigner.issueWatch")(function* (
+    this: RemoteTicketSigner,
+    input: {
+      claims: Omit<WatchTicketClaims, "aud" | "jti" | "iat" | "exp">;
+      sessionExpiresAt: number;
+      now: number;
+    },
+  ) {
+    const issuedAt = Math.floor(input.now / 1_000);
+    const expiresAt = Math.min(issuedAt + WATCH_TICKET_TTL_SECONDS, Math.floor(input.sessionExpiresAt / 1_000));
+    const signingKey = yield* this.#signingKey();
+    const ticket = yield* remoteCall(() =>
+      new SignJWT({ ...input.claims })
+        .setProtectedHeader({ alg: "ES256", typ: "JWT", kid: this.#keyId })
+        .setJti(crypto.randomUUID())
+        .setIssuedAt(issuedAt)
+        .setExpirationTime(expiresAt)
+        .setAudience(WATCH_TICKET_AUDIENCE)
         .sign(signingKey),
     );
     return { ticket, expiresAt: expiresAt * 1_000 };
@@ -931,7 +960,7 @@ export class RemoteControlPlane {
         (row) =>
           Effect.gen({ self: this }, function* () {
             const license = yield* this.#ownerLicense(row.host_id);
-            const { limit } = yield* this.#memberLimit(row.host_id, license);
+            const { limit, licenseRaises } = yield* this.#memberLimit(row.host_id, license);
             return {
               hostId: row.host_id,
               name: row.name,
@@ -943,6 +972,7 @@ export class RemoteControlPlane {
               membershipId: row.membership_id,
               role: row.role,
               memberLimit: license ? Math.min(limit, license.users) : limit,
+              licenseRaisesMemberLimit: row.role === "owner" && licenseRaises,
               hosted: row.hosted_plan !== null,
               ...(row.hidden_at === null ? {} : { hidden: true as const }),
               ...(row.operator_host === null ? {} : { restartAvailable: false }),
@@ -2382,6 +2412,52 @@ export class RemoteControlPlane {
     (operation) => operation.pipe(Effect.provide(this.#layer)),
   ).bind(this);
 
+  readonly issueWatchTicket = Effect.fn("RemoteControlPlane.issueWatchTicket")(
+    function* (
+      this: RemoteControlPlane,
+      input: {
+        watchSessionId: string;
+        userId: string;
+        hostId: string;
+        clientPublicKey: string;
+        sessionExpiresAt: number;
+      },
+    ) {
+      const dependencies = yield* RemoteDependencies;
+      const membership = yield* remoteCall(() =>
+        dependencies.database
+          .prepare(
+            `SELECT m.membership_id, m.host_id, m.user_id, m.role, m.status, h.auth_epoch, h.signal_home
+         FROM remote_memberships m
+         JOIN remote_hosts h ON h.host_id = m.host_id
+         WHERE m.host_id = ? AND m.user_id = ? AND m.status = 'active' LIMIT 1`,
+          )
+          .bind(input.hostId, input.userId)
+          .first<RemoteMembershipRow & { auth_epoch: number; signal_home: string | null }>(),
+      );
+      const member = yield* remoteValidate(() => this.#assertRole(membership, ["owner", "admin", "member"]));
+      const signal = dependencies.signal;
+      if (!signal) return yield* remoteSignalNotConfigured();
+      const home = configuredSignalHome(signal, member.signal_home);
+      const issued = yield* dependencies.signer.issueWatch({
+        claims: {
+          watchSessionId: input.watchSessionId,
+          hostId: member.host_id,
+          userId: input.userId,
+          membershipId: member.membership_id,
+          role: member.role,
+          authEpoch: member.auth_epoch,
+          clientPublicKey: input.clientPublicKey,
+          ...(home ? { signal: home.id } : {}),
+        },
+        sessionExpiresAt: input.sessionExpiresAt,
+        now: dependencies.now(),
+      });
+      return { ...issued, signalUrl: home?.url ?? signal.entryUrl };
+    },
+    (operation) => operation.pipe(Effect.provide(this.#layer)),
+  ).bind(this);
+
   readonly planChanged = Effect.fn("RemoteControlPlane.planChanged")(
     function* (this: RemoteControlPlane, hostId: string): Effect.fn.Return<void, RemoteFailure, RemoteDependencies> {
       yield* this.#serversChanged(
@@ -3454,14 +3530,20 @@ export class RemoteControlPlane {
     const custom = yield* remoteCall(() =>
       dependencies.database.prepare(SERVER_MEMBER_LIMIT_SQL).bind(hostId).first<{ member_limit: number }>(),
     );
-    if (custom) return { limit: custom.member_limit, fromLicense: false };
+    const below = (limit: number) => license !== null && license.users < limit;
+    if (custom) return { limit: custom.member_limit, fromLicense: false, licenseRaises: below(custom.member_limit) };
     const plan = yield* getServerEntitlement(dependencies.database, hostId, dependencies.now()).pipe(
       Effect.mapError((error) => (error instanceof RemoteControlPlaneError ? error : new RemoteOperationError({}))),
     );
-    if (plan?.hosted) return { limit: plan.memberLimit, fromLicense: false };
+    if (plan?.hosted) return { limit: plan.memberLimit, fromLicense: false, licenseRaises: below(plan.memberLimit) };
     if (license?.entitled && license.users > (plan?.memberLimit ?? 0))
-      return { limit: license.users, fromLicense: true };
-    return { limit: plan?.memberLimit ?? DEFAULT_TEAM_MEMBER_LIMIT, fromLicense: false };
+      return { limit: license.users, fromLicense: true, licenseRaises: true };
+    const limit = plan?.memberLimit ?? DEFAULT_TEAM_MEMBER_LIMIT;
+    return {
+      limit,
+      fromLicense: false,
+      licenseRaises: below(limit) || (license?.entitled === true && plan !== null && license.users === limit),
+    };
   });
 
   #assertRole<Row extends RemoteMembershipRow>(membership: Row | null, roles: RemoteMemberRole[]): Row {

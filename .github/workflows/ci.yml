@@ -339,9 +339,17 @@ jobs:
       - name: Run the Team API routes E2E test
         run: bun run test:team-api-routes
 
+      - name: Run the Apple Watch relay host E2E test
+        if: ${{ !cancelled() }}
+        run: bun run test:watch-relay-host
+
       - name: Run the CRM Team API E2E test
         if: ${{ !cancelled() }}
         run: bun run test:crm-team-api
+
+      - name: Run the account activity reporter E2E test
+        if: ${{ !cancelled() }}
+        run: bun run test:account-activity-reporter
 
       - name: Run the release version comparator E2E test
         if: ${{ !cancelled() }}
@@ -355,6 +363,7 @@ jobs:
           path: |
             .openbot-build/team-api-routes-e2e/
             .openbot-build/crm-team-api-e2e/
+            .openbot-build/watch-relay-host-e2e/
             .openbot-build/release-version-comparator-e2e.json
           if-no-files-found: ignore
 
@@ -732,10 +741,6 @@ jobs:
         if: ${{ !cancelled() }}
         run: bun run test:agent-update-agents
 
-      - name: Run the Gemini usage E2E test
-        if: ${{ !cancelled() }}
-        run: bun run test:antigravity-usage
-
       - name: Run the Gemini accounts E2E test
         if: ${{ !cancelled() }}
         run: bun run test:antigravity-accounts
@@ -767,6 +772,14 @@ jobs:
       - name: Run the credit media workflow E2E test
         if: ${{ !cancelled() }}
         run: bun run test:credit-media-workflow
+
+      - name: Run the credit media agent tools E2E test
+        if: ${{ !cancelled() }}
+        run: bun run test:credit-media-agent-tools
+
+      - name: Run the credit media analytics E2E test
+        if: ${{ !cancelled() }}
+        run: bun run test:credit-media-analytics
 
       - name: Run the workflow paid media E2E test
         if: ${{ !cancelled() }}
@@ -989,7 +1002,6 @@ jobs:
             .openbot-build/agent-mcp-tools-e2e/
             .openbot-build/mcp-server-unreadable-row-e2e/
             .openbot-build/agent-update-agents-e2e/
-            .openbot-build/antigravity-usage-e2e/
             .openbot-build/antigravity-accounts-e2e/
             .openbot-build/antigravity-usage-metering-e2e/
             .openbot-build/antigravity-quota-failover-e2e/
@@ -997,6 +1009,8 @@ jobs:
             .openbot-build/antigravity-verification-link-e2e/
             .openbot-build/workflow-model-steps-e2e/
             .openbot-build/credit-media-workflow-e2e/
+            .openbot-build/credit-media-agent-tools-e2e/
+            .openbot-build/credit-media-analytics-e2e/
             .openbot-build/workflow-paid-media-e2e/
             .openbot-build/credit-media-payer-switch-e2e/
             .openbot-build/workflow-discord-e2e/

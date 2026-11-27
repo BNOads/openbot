@@ -20,7 +20,7 @@ computer of the user who signs in. A sign-in uses one of these kinds:
 
 | Kind | Example | On this computer | On a joined server |
 | --- | --- | --- | --- |
-| Loopback callback | URL MCP servers (`McpOAuth`), Codex browser sign-in, a page that an agent's CLI prints | The page sends the browser to `http://127.0.0.1:<port>/...`. The MCP listener uses port 28417 and path `/mcp-auth` ([`mcp-oauth-redirect-server.ts`](../../src/main/mcp-oauth-redirect-server.ts)). | The [callback relay](#remote-sign-in-the-callback-relay) (`sign-in-relay-v1`). MCP on an older host: the host's live view (`mcp-sign-in-v1`). |
+| Loopback callback | URL MCP servers (`McpOAuth`), Codex browser sign-in, a page that an agent's CLI prints | The page sends the browser to `http://127.0.0.1:<port>/...`. The MCP listener uses port 28417 and takes the paths `/mcp-auth` and `/callback` ([`mcp-oauth-redirect-server.ts`](../../src/main/mcp-oauth-redirect-server.ts)). A sign-in on this computer registers `/callback` first: New Relic accepts a loopback page only on a common path such as `/callback` (#13216). A client that never finished a sign-in at `/mcp-auth` registers again. A sign-in that another computer opens (relay or live view) keeps `/mcp-auth`, because clients older than 0.70.0 take only that path. A server that refuses one path at registration gets the other. | The [callback relay](#remote-sign-in-the-callback-relay) (`sign-in-relay-v1`). MCP on an older host: the host's live view (`mcp-sign-in-v1`). |
 | Device code | Codex (`codex-device`), Grok, Cline, Kimi, Muse, the GitHub connector | The user types a short code on the provider's page. Nothing comes back to OpenBot. | The host starts it and the client shows the code (`providers-v1` to `providers-v5`; Kimi `providers-v8` only). Muse: the relay opens its device page with no callback. GitHub: `connectors-v1`. |
 | Pasted code | Claude on Linux (`cli` / `paste`), Cursor (`cli` / `link`) | The page shows a code, and the user pastes it into OpenBot. | The host starts it and the client takes the code (`providers-v3` to `providers-v5`). |
 | CLI-owned browser login | Claude (`auth login`), Codex, Gemini (`acp-authenticate`) | The provider's CLI opens the browser and takes its own callback. | The relay (`provider/start`): the host captures the page, and the client sends the callback query to the CLI's listener on the host. Grok, Cursor and Cline: a code kind. Mistral: the host takes the page from Vibe (`acp-delegated`) and the client shows it as a link (`providers-v8` with `mistral-code-sign-in-v1`). |
@@ -682,6 +682,35 @@ pins, with a SHA-256 per target, into `<userData>/provider-state/protonpass-cli`
 the record and the session; the agent access key stays on the Proton account until it ends or the
 user removes it there.
 
+## NEAR Intents wallet
+
+The Crypto tab of the Vault connects one NEAR Intents agent account (Agent API, SDK
+`@near-intents-agent-api/sdk`) for agent payments. Main owns it:
+[`near-wallet-service.ts`](../../src/main/near-wallet-service.ts) and
+[`near-wallet-store.ts`](../../src/main/near-wallet-store.ts). The renderer, the backend and the
+agent processes never get the partner key, the grant token or a signature.
+
+- **Owner.** A passkey. OpenBot does not support an EVM wallet owner. Each owner action (register, create, grant, budget, freeze,
+  unfreeze, auto-pay, a vote on a payment) opens `/near/sign` of the account service in the system
+  browser ([`near-wallet-signing.ts`](../../src/main/near-wallet-signing.ts)). The request is in the
+  URL fragment, which no server gets. The page returns the signature with
+  `openbot://near-signature?nonce=…&data=…`; a development build uses a loopback listener. Main takes
+  only the result of the one waiting nonce (32 random bytes, used once) and checks its shape and the
+  passkey key type.
+- **Grant.** OpenBot holds an agent grant for 30 days. Payments use it; Renew signs a new one.
+- **Payments.** An agent calls `request_near_payment`
+  ([`attention-registry.ts`](../../src/backend/agent/attention-registry.ts)). All agents can ask, also
+  agents made later, until the owner chooses a list on the wallet page; a wallet stored with a list
+  keeps it. A new wallet's daily budget is $25. A request from a Slack, Discord or Telegram chat is
+  refused. A payment that no rule allows waits for the owner on the chat card. A rule of "Pay without asking" allows a
+  recipient for a domain up to a daily USD limit; the first rule turns off `owner_approval` with one
+  signature. The Agent API keeps the daily budget of all payments.
+- **No double payment.** A payment is stored with its idempotency key before it is sent. A lost
+  answer is `uncertain`: OpenBot sends it again with the same key, also after a restart, for one hour.
+- **Test.** `bun run test:near-wallet-e2e` runs the service against a fake Agent API on 127.0.0.1
+  with a real P-256 passkey owner key. The real Agent API has no test network; do not run payments
+  against it without the owner's consent.
+
 ## Add a Team API capability
 
 A new remote feature is a new optional capability. Do not change a shipped capability: released
@@ -737,6 +766,7 @@ Use `bun run dev:automation` for snapshots and screenshots. Do not drive another
 | --- | --- |
 | A sign-in that returns to a public `https:` address of the provider | The provider finishes it by itself. The host only waits. Nothing comes back to a loopback port. |
 | A sign-in that opens an app on the host, such as Pi, which opens Terminal | The step happens on the host's screen. There is no page address to open somewhere else. |
+| The owner signature of the NEAR Intents wallet | The passkey belongs to the `api.openbot.run` page on the host's browser, and the Agent API checks its origin. The wallet is on this computer only; a joined server has no Crypto tab. |
 | A vault that approves in its desktop app, such as 1Password or Bitwarden | The approval is in the vault app on the host. A relay cannot approve for it. 1Password on a joined server uses a service account token (`onepassword-connector-v1`); Bitwarden uses an API key and the master password (`bitwarden-connector-v1`). Proton Pass signs in on the host and the client opens Proton's page (`password-managers-v1`). |
 | The Slack development return address (`returnUrl`) | Development builds only. It returns to `http://127.0.0.1:<port>/...` on the host, and the relay does not carry it. Use the hosted install. |
 | An agent link for a member who is not an admin | The relay routes are admin only. The link opens as it is, and its callback cannot reach the host. |
@@ -751,8 +781,9 @@ The extension (`apps/browser-extension`) sends a post from X to the user's X age
 `marketplace/production-catalog`). On desktop and web, the user adds this agent with the X app of
 the Marketplace (`MarketplaceXAppPage` in `packages/ui/src/features/marketplace`), not from the Agents
 tab. Its setup has two steps, as a chat app has: get the extension (`X_EXTENSION_URL`), then add the
-agent through the usual Marketplace install. The X app shows only when `X_EXTENSION_URL` is set; it is
-`null` until the store page exists. It then shows on this computer, and on a joined server only for an
+agent through the usual Marketplace install. `X_EXTENSION_URL` is the Chrome Web Store page of the
+extension (ID `eggdpikcggoicfcfdpdihfkinajchpfj`, also in `BROWSER_EXTENSION_IDS` of
+`apps/auth-api/wrangler.jsonc`). The X app shows on this computer, and on a joined server only for an
 admin that can install agents (`agent-install-v1`), as Discord and the other chat apps do.
 There are three parts:
 

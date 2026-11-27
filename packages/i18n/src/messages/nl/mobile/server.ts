@@ -550,6 +550,18 @@ export const messages = {
   "mobile.server.settings.memoryLimitSaveFailed": "Kan de geheugenlimiet niet opslaan. Probeer het opnieuw.",
   "mobile.server.settings.memoryLimitUnsupported":
     "Werk OpenBot bij op deze server om de geheugenlimiet hier te wijzigen.",
+  "mobile.server.settings.mediaApprovalCredits": "Vragen bij meer dan",
+  "mobile.server.settings.mediaApprovalCreditsUnit": "credits",
+  "mobile.server.settings.mediaApprovalCreditsLoadFailed": "Kan de creditgoedkeuringsgrens van deze server niet laden.",
+  "mobile.server.settings.mediaApprovalCreditsSaveFailed":
+    "Kan de creditgoedkeuringsgrens niet opslaan. Probeer het opnieuw.",
+  "mobile.server.settings.mediaApprovalCreditsUnsupported":
+    "Werk OpenBot op deze server bij om de creditgoedkeuringsgrens hier te wijzigen.",
+  "mobile.server.settings.mediaApprovalAgents": "Agents mogen credits gebruiken",
+  "mobile.server.settings.mediaApprovalAgentsSaveFailed":
+    "Kan het creditgebruik door agents niet wijzigen. Probeer het opnieuw.",
+  "mobile.server.settings.mediaApprovalAsk": "Vragen wanneer credits nodig zijn",
+  "mobile.server.settings.mediaApprovalAskSaveFailed": "Kan de creditaanvragen niet wijzigen. Probeer het opnieuw.",
   "mobile.server.settings.memoryReview": "Geheugencontrole",
   "mobile.server.settings.memoryReviewDescription":
     "Hoe vaak agents op deze server op de achtergrond blijvende feiten uit hun chats bewaren.",
@@ -1152,6 +1164,11 @@ export const messages = {
   "mobile.server.providers.pool": "Accounts bundelen",
   "mobile.server.providers.poolHint":
     "Agents gebruiken één account tot het een gebruikslimiet nadert, en dan het account waarvan de limiet het eerst reset.",
+  "mobile.server.providers.poolStrategy": "Accounts gebruiken",
+  "mobile.server.providers.poolFillFirst": "Eerst vullen",
+  "mobile.server.providers.poolSpread": "Spreiden",
+  "mobile.server.providers.poolSpreadHint":
+    "Agents verdelen zich over de accounts met het meeste gebruik over. Een agent wisselt alleen van account als een ander account veel meer ruimte heeft.",
   "mobile.server.providers.accountsPooledHint":
     "Agents delen deze accounts. Een nieuw account meldt zich aan op zijn pagina op deze telefoon.",
   "mobile.server.providers.accountsPooledOnComputer":

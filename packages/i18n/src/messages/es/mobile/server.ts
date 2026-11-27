@@ -553,6 +553,20 @@ export const messages = {
   "mobile.server.settings.memoryLimitSaveFailed": "No se pudo guardar el límite de recuerdos. Inténtalo de nuevo.",
   "mobile.server.settings.memoryLimitUnsupported":
     "Actualiza OpenBot en este servidor para cambiar aquí su límite de recuerdos.",
+  "mobile.server.settings.mediaApprovalCredits": "Preguntar antes de gastar más de",
+  "mobile.server.settings.mediaApprovalCreditsUnit": "créditos",
+  "mobile.server.settings.mediaApprovalCreditsLoadFailed":
+    "No se pudo cargar el límite de aprobación de créditos de este servidor.",
+  "mobile.server.settings.mediaApprovalCreditsSaveFailed":
+    "No se pudo guardar el límite de aprobación de créditos. Inténtalo de nuevo.",
+  "mobile.server.settings.mediaApprovalCreditsUnsupported":
+    "Actualiza OpenBot en este servidor para cambiar aquí su límite de aprobación de créditos.",
+  "mobile.server.settings.mediaApprovalAgents": "Los agentes pueden usar créditos",
+  "mobile.server.settings.mediaApprovalAgentsSaveFailed":
+    "No se pudo cambiar el uso de créditos por los agentes. Inténtalo de nuevo.",
+  "mobile.server.settings.mediaApprovalAsk": "Preguntar cuando se necesiten créditos",
+  "mobile.server.settings.mediaApprovalAskSaveFailed":
+    "No se pudieron cambiar las solicitudes de créditos. Inténtalo de nuevo.",
   "mobile.server.settings.memoryReview": "Revisión de recuerdos",
   "mobile.server.settings.memoryReviewDescription":
     "Con qué frecuencia los agentes de este servidor guardan en segundo plano datos duraderos de sus chats.",
@@ -1197,6 +1211,11 @@ export const messages = {
   "mobile.server.providers.pool": "Agrupar cuentas",
   "mobile.server.providers.poolHint":
     "Los agentes usan una cuenta hasta que se acerca a un límite de uso y luego la cuenta cuyo límite se restablece antes.",
+  "mobile.server.providers.poolStrategy": "Usar cuentas",
+  "mobile.server.providers.poolFillFirst": "Llenar primero",
+  "mobile.server.providers.poolSpread": "Repartir",
+  "mobile.server.providers.poolSpreadHint":
+    "Los agentes se reparten entre las cuentas con más uso disponible. Un agente cambia de cuenta solo cuando otra cuenta tiene mucho más margen.",
   "mobile.server.providers.accountsPooledHint":
     "Los agentes comparten estas cuentas. Una cuenta nueva inicia sesión en su página en este teléfono.",
   "mobile.server.providers.accountsPooledOnComputer":

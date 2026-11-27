@@ -554,6 +554,20 @@ export const messages = {
   "mobile.server.settings.memoryLimitSaveFailed": "Não foi possível salvar o limite de memórias. Tente de novo.",
   "mobile.server.settings.memoryLimitUnsupported":
     "Atualize o OpenBot neste servidor para alterar o limite de memórias aqui.",
+  "mobile.server.settings.mediaApprovalCredits": "Perguntar antes de gastar mais de",
+  "mobile.server.settings.mediaApprovalCreditsUnit": "créditos",
+  "mobile.server.settings.mediaApprovalCreditsLoadFailed":
+    "Não foi possível carregar o limite de aprovação de créditos deste servidor.",
+  "mobile.server.settings.mediaApprovalCreditsSaveFailed":
+    "Não foi possível salvar o limite de aprovação de créditos. Tente de novo.",
+  "mobile.server.settings.mediaApprovalCreditsUnsupported":
+    "Atualize o OpenBot neste servidor para alterar aqui o limite de aprovação de créditos.",
+  "mobile.server.settings.mediaApprovalAgents": "Os agentes podem usar créditos",
+  "mobile.server.settings.mediaApprovalAgentsSaveFailed":
+    "Não foi possível alterar o uso de créditos pelos agentes. Tente de novo.",
+  "mobile.server.settings.mediaApprovalAsk": "Perguntar quando precisar de créditos",
+  "mobile.server.settings.mediaApprovalAskSaveFailed":
+    "Não foi possível alterar os pedidos de créditos. Tente de novo.",
   "mobile.server.settings.memoryReview": "Revisão de memórias",
   "mobile.server.settings.memoryReviewDescription":
     "Com que frequência os agentes deste servidor guardam em segundo plano fatos duradouros das conversas.",
@@ -1193,6 +1207,11 @@ export const messages = {
   "mobile.server.providers.pool": "Agrupar contas",
   "mobile.server.providers.poolHint":
     "Os agentes usam uma conta até ela chegar perto de um limite de uso e depois a conta cujo limite reinicia primeiro.",
+  "mobile.server.providers.poolStrategy": "Usar contas",
+  "mobile.server.providers.poolFillFirst": "Encher primeiro",
+  "mobile.server.providers.poolSpread": "Distribuir",
+  "mobile.server.providers.poolSpreadHint":
+    "Os agentes se distribuem entre as contas com mais uso restante. Um agente só troca de conta quando outra conta tem muito mais margem.",
   "mobile.server.providers.accountsPooledHint":
     "Os agentes compartilham estas contas. Uma conta nova entra pela página dela neste celular.",
   "mobile.server.providers.accountsPooledOnComputer":

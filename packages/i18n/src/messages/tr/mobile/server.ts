@@ -554,6 +554,16 @@ export const messages = {
   "mobile.server.settings.memoryLimitSaveFailed": "Anı sınırı kaydedilemedi. Tekrar deneyin.",
   "mobile.server.settings.memoryLimitUnsupported":
     "Anı sınırını burada değiştirmek için bu sunucudaki OpenBot'u güncelleyin.",
+  "mobile.server.settings.mediaApprovalCredits": "Şu miktarı aşınca sor",
+  "mobile.server.settings.mediaApprovalCreditsUnit": "kredi",
+  "mobile.server.settings.mediaApprovalCreditsLoadFailed": "Bu sunucunun kredi onay sınırı yüklenemedi.",
+  "mobile.server.settings.mediaApprovalCreditsSaveFailed": "Kredi onay sınırı kaydedilemedi. Tekrar deneyin.",
+  "mobile.server.settings.mediaApprovalCreditsUnsupported":
+    "Kredi onay sınırını buradan değiştirmek için bu sunucudaki OpenBot'u güncelleyin.",
+  "mobile.server.settings.mediaApprovalAgents": "Ajanlar kredi kullanabilir",
+  "mobile.server.settings.mediaApprovalAgentsSaveFailed": "Ajanların kredi kullanımı değiştirilemedi. Tekrar deneyin.",
+  "mobile.server.settings.mediaApprovalAsk": "Kredi gerektiğinde sor",
+  "mobile.server.settings.mediaApprovalAskSaveFailed": "Kredi istekleri değiştirilemedi. Tekrar deneyin.",
   "mobile.server.settings.memoryReview": "Bellek incelemesi",
   "mobile.server.settings.memoryReviewDescription":
     "Bu sunucudaki ajanların sohbetlerindeki kalıcı bilgileri arka planda ne sıklıkla kaydettiği.",
@@ -1179,6 +1189,11 @@ export const messages = {
   "mobile.server.providers.pool": "Hesapları havuzla",
   "mobile.server.providers.poolHint":
     "Ajanlar bir hesabı kullanım sınırına yaklaşana kadar kullanır, sonra sınırı ilk sıfırlanan hesaba geçer.",
+  "mobile.server.providers.poolStrategy": "Hesap kullanımı",
+  "mobile.server.providers.poolFillFirst": "Önce doldur",
+  "mobile.server.providers.poolSpread": "Dağıt",
+  "mobile.server.providers.poolSpreadHint":
+    "Ajanlar en çok kullanım hakkı kalan hesaplara dağılır. Bir ajan yalnızca başka bir hesapta çok daha fazla yer olduğunda hesap değiştirir.",
   "mobile.server.providers.accountsPooledHint":
     "Ajanlar bu hesapları paylaşır. Yeni bir hesap bu telefonda kendi sayfasından oturum açar.",
   "mobile.server.providers.accountsPooledOnComputer":

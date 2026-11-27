@@ -528,6 +528,17 @@ export const messages = {
   "mobile.server.settings.memoryLimitSaveFailed": "메모리 한도를 저장하지 못했어요. 다시 시도해 주세요.",
   "mobile.server.settings.memoryLimitUnsupported":
     "여기에서 메모리 한도를 변경하려면 이 서버의 OpenBot을 업데이트해 주세요.",
+  "mobile.server.settings.mediaApprovalCredits": "다음 값을 넘으면 확인",
+  "mobile.server.settings.mediaApprovalCreditsUnit": "크레딧",
+  "mobile.server.settings.mediaApprovalCreditsLoadFailed": "이 서버의 크레딧 승인 한도를 불러오지 못했어요.",
+  "mobile.server.settings.mediaApprovalCreditsSaveFailed": "크레딧 승인 한도를 저장하지 못했어요. 다시 시도해 주세요.",
+  "mobile.server.settings.mediaApprovalCreditsUnsupported":
+    "여기에서 크레딧 승인 한도를 변경하려면 이 서버의 OpenBot을 업데이트해 주세요.",
+  "mobile.server.settings.mediaApprovalAgents": "에이전트의 크레딧 사용 허용",
+  "mobile.server.settings.mediaApprovalAgentsSaveFailed":
+    "에이전트의 크레딧 사용을 변경하지 못했어요. 다시 시도해 주세요.",
+  "mobile.server.settings.mediaApprovalAsk": "크레딧이 필요할 때 묻기",
+  "mobile.server.settings.mediaApprovalAskSaveFailed": "크레딧 요청 설정을 변경하지 못했어요. 다시 시도해 주세요.",
   "mobile.server.settings.memoryReview": "메모리 검토",
   "mobile.server.settings.memoryReviewDescription":
     "이 서버의 에이전트가 채팅에서 오래 쓸 사실을 백그라운드에서 저장하는 빈도예요.",
@@ -1128,6 +1139,11 @@ export const messages = {
   "mobile.server.providers.pool": "계정 풀 사용",
   "mobile.server.providers.poolHint":
     "에이전트는 사용량 한도에 가까워질 때까지 한 계정을 쓰고, 그다음 한도가 가장 먼저 초기화되는 계정을 써요.",
+  "mobile.server.providers.poolStrategy": "계정 사용 방식",
+  "mobile.server.providers.poolFillFirst": "먼저 채우기",
+  "mobile.server.providers.poolSpread": "분산",
+  "mobile.server.providers.poolSpreadHint":
+    "에이전트가 사용량이 가장 많이 남은 계정에 나뉘어요. 다른 계정에 여유가 훨씬 많을 때만 에이전트가 계정을 바꿔요.",
   "mobile.server.providers.accountsPooledHint":
     "에이전트가 이 계정들을 함께 써요. 새 계정은 이 휴대폰에서 계정 페이지로 로그인해요.",
   "mobile.server.providers.accountsPooledOnComputer":

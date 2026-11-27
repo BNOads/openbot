@@ -555,6 +555,19 @@ export const messages = {
   "mobile.server.settings.memoryLimitSaveFailed": "Impossible d’enregistrer la limite de souvenirs. Réessayez.",
   "mobile.server.settings.memoryLimitUnsupported":
     "Mettez à jour OpenBot sur ce serveur pour changer sa limite de souvenirs ici.",
+  "mobile.server.settings.mediaApprovalCredits": "Demander avant de dépenser plus de",
+  "mobile.server.settings.mediaApprovalCreditsUnit": "crédits",
+  "mobile.server.settings.mediaApprovalCreditsLoadFailed":
+    "Impossible de charger le seuil d’approbation des crédits de ce serveur.",
+  "mobile.server.settings.mediaApprovalCreditsSaveFailed":
+    "Impossible d’enregistrer le seuil d’approbation des crédits. Réessayez.",
+  "mobile.server.settings.mediaApprovalCreditsUnsupported":
+    "Mettez à jour OpenBot sur ce serveur pour modifier ici son seuil d’approbation des crédits.",
+  "mobile.server.settings.mediaApprovalAgents": "Les agents peuvent utiliser des crédits",
+  "mobile.server.settings.mediaApprovalAgentsSaveFailed":
+    "Impossible de modifier l’utilisation des crédits par les agents. Réessayez.",
+  "mobile.server.settings.mediaApprovalAsk": "Demander quand des crédits sont nécessaires",
+  "mobile.server.settings.mediaApprovalAskSaveFailed": "Impossible de modifier les demandes de crédits. Réessayez.",
   "mobile.server.settings.memoryReview": "Revue des souvenirs",
   "mobile.server.settings.memoryReviewDescription":
     "À quelle fréquence les agents de ce serveur enregistrent en arrière-plan les faits durables de leurs discussions.",
@@ -1191,6 +1204,11 @@ export const messages = {
   "mobile.server.providers.pool": "Regrouper les comptes",
   "mobile.server.providers.poolHint":
     "Les agents utilisent un compte jusqu’à ce qu’il approche d’une limite d’usage, puis le compte dont la limite se réinitialise en premier.",
+  "mobile.server.providers.poolStrategy": "Utiliser les comptes",
+  "mobile.server.providers.poolFillFirst": "Remplir d’abord",
+  "mobile.server.providers.poolSpread": "Répartir",
+  "mobile.server.providers.poolSpreadHint":
+    "Les agents se répartissent sur les comptes qui ont le plus d’usage restant. Un agent change de compte seulement quand un autre compte a beaucoup plus de marge.",
   "mobile.server.providers.accountsPooledHint":
     "Les agents partagent ces comptes. Un nouveau compte se connecte sur sa page, sur ce téléphone.",
   "mobile.server.providers.accountsPooledOnComputer":

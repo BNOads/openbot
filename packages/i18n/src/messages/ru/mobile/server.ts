@@ -603,6 +603,19 @@ export const messages = {
   "mobile.server.settings.memoryLimitSaveFailed": "Не удалось сохранить лимит воспоминаний. Повторите попытку.",
   "mobile.server.settings.memoryLimitUnsupported":
     "Обновите OpenBot на этом сервере, чтобы изменить здесь его лимит воспоминаний.",
+  "mobile.server.settings.mediaApprovalCredits": "Спрашивать, если больше",
+  "mobile.server.settings.mediaApprovalCreditsUnit": "кредитов",
+  "mobile.server.settings.mediaApprovalCreditsLoadFailed":
+    "Не удалось загрузить порог подтверждения кредитов этого сервера.",
+  "mobile.server.settings.mediaApprovalCreditsSaveFailed":
+    "Не удалось сохранить порог подтверждения кредитов. Повторите попытку.",
+  "mobile.server.settings.mediaApprovalCreditsUnsupported":
+    "Обновите OpenBot на этом сервере, чтобы изменить здесь его порог подтверждения кредитов.",
+  "mobile.server.settings.mediaApprovalAgents": "Агенты могут использовать кредиты",
+  "mobile.server.settings.mediaApprovalAgentsSaveFailed":
+    "Не удалось изменить использование кредитов агентами. Повторите попытку.",
+  "mobile.server.settings.mediaApprovalAsk": "Спрашивать, когда нужны кредиты",
+  "mobile.server.settings.mediaApprovalAskSaveFailed": "Не удалось изменить запросы кредитов. Повторите попытку.",
   "mobile.server.settings.memoryReview": "Проверка памяти",
   "mobile.server.settings.memoryReviewDescription":
     "Как часто агенты на этом сервере сохраняют в фоне устойчивые факты из своих чатов.",
@@ -1284,6 +1297,11 @@ export const messages = {
   "mobile.server.providers.pool": "Объединить аккаунты",
   "mobile.server.providers.poolHint":
     "Агенты используют один аккаунт, пока он не приблизится к лимиту, а затем аккаунт, чей лимит сбросится раньше всех.",
+  "mobile.server.providers.poolStrategy": "Использование аккаунтов",
+  "mobile.server.providers.poolFillFirst": "Сначала заполнять",
+  "mobile.server.providers.poolSpread": "Распределять",
+  "mobile.server.providers.poolSpreadHint":
+    "Агенты распределяются по аккаунтам, у которых осталось больше всего лимита. Агент меняет аккаунт, только когда у другого аккаунта намного больше запаса.",
   "mobile.server.providers.accountsPooledHint":
     "Агенты используют эти аккаунты вместе. Новый аккаунт входит на своей странице на этом телефоне.",
   "mobile.server.providers.accountsPooledOnComputer":

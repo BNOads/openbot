@@ -545,6 +545,19 @@ export const messages = {
   "mobile.server.settings.memoryLimitSaveFailed": "Impossibile salvare il limite di memorie. Riprova.",
   "mobile.server.settings.memoryLimitUnsupported":
     "Aggiorna OpenBot su questo server per cambiarne qui il limite di memorie.",
+  "mobile.server.settings.mediaApprovalCredits": "Chiedi prima di spendere più di",
+  "mobile.server.settings.mediaApprovalCreditsUnit": "crediti",
+  "mobile.server.settings.mediaApprovalCreditsLoadFailed":
+    "Impossibile caricare la soglia di approvazione dei crediti di questo server.",
+  "mobile.server.settings.mediaApprovalCreditsSaveFailed":
+    "Impossibile salvare la soglia di approvazione dei crediti. Riprova.",
+  "mobile.server.settings.mediaApprovalCreditsUnsupported":
+    "Aggiorna OpenBot su questo server per modificarne qui la soglia di approvazione dei crediti.",
+  "mobile.server.settings.mediaApprovalAgents": "Gli agenti possono usare crediti",
+  "mobile.server.settings.mediaApprovalAgentsSaveFailed":
+    "Impossibile modificare l’uso dei crediti da parte degli agenti. Riprova.",
+  "mobile.server.settings.mediaApprovalAsk": "Chiedi quando servono crediti",
+  "mobile.server.settings.mediaApprovalAskSaveFailed": "Impossibile modificare le richieste di crediti. Riprova.",
   "mobile.server.settings.memoryReview": "Revisione delle memorie",
   "mobile.server.settings.memoryReviewDescription":
     "Ogni quanto gli agenti di questo server salvano in background i fatti duraturi delle loro chat.",
@@ -1178,6 +1191,11 @@ export const messages = {
   "mobile.server.providers.pool": "Raggruppa account",
   "mobile.server.providers.poolHint":
     "Gli agenti usano un account finché non si avvicina a un limite di utilizzo, poi l'account il cui limite si azzera per primo.",
+  "mobile.server.providers.poolStrategy": "Usa gli account",
+  "mobile.server.providers.poolFillFirst": "Riempi prima",
+  "mobile.server.providers.poolSpread": "Distribuisci",
+  "mobile.server.providers.poolSpreadHint":
+    "Gli agenti si distribuiscono sugli account con più utilizzo rimasto. Un agente cambia account solo quando un altro account ha molto più margine.",
   "mobile.server.providers.accountsPooledHint":
     "Gli agenti condividono questi account. Un nuovo account accede dalla sua pagina su questo telefono.",
   "mobile.server.providers.accountsPooledOnComputer":

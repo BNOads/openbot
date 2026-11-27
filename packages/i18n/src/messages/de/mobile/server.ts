@@ -566,6 +566,20 @@ export const messages = {
     "Das Erinnerungslimit konnte nicht gespeichert werden. Versuche es erneut.",
   "mobile.server.settings.memoryLimitUnsupported":
     "Aktualisiere OpenBot auf diesem Server, um sein Erinnerungslimit hier zu ändern.",
+  "mobile.server.settings.mediaApprovalCredits": "Fragen bei mehr als",
+  "mobile.server.settings.mediaApprovalCreditsUnit": "Credits",
+  "mobile.server.settings.mediaApprovalCreditsLoadFailed":
+    "Die Credit-Freigabegrenze dieses Servers konnte nicht geladen werden.",
+  "mobile.server.settings.mediaApprovalCreditsSaveFailed":
+    "Die Credit-Freigabegrenze konnte nicht gespeichert werden. Versuche es erneut.",
+  "mobile.server.settings.mediaApprovalCreditsUnsupported":
+    "Aktualisiere OpenBot auf diesem Server, um seine Credit-Freigabegrenze hier zu ändern.",
+  "mobile.server.settings.mediaApprovalAgents": "Agenten dürfen Credits verwenden",
+  "mobile.server.settings.mediaApprovalAgentsSaveFailed":
+    "Die Credit-Nutzung durch Agenten konnte nicht geändert werden. Versuche es erneut.",
+  "mobile.server.settings.mediaApprovalAsk": "Fragen, wenn Credits nötig sind",
+  "mobile.server.settings.mediaApprovalAskSaveFailed":
+    "Die Credit-Anfragen konnten nicht geändert werden. Versuche es erneut.",
   "mobile.server.settings.memoryReview": "Erinnerungsprüfung",
   "mobile.server.settings.memoryReviewDescription":
     "Wie oft Agenten auf diesem Server im Hintergrund dauerhafte Fakten aus ihren Chats speichern.",
@@ -1213,6 +1227,11 @@ export const messages = {
   "mobile.server.providers.pool": "Konten bündeln",
   "mobile.server.providers.poolHint":
     "Agenten nutzen ein Konto, bis es fast ein Nutzungslimit erreicht, dann das Konto, dessen Limit zuerst zurückgesetzt wird.",
+  "mobile.server.providers.poolStrategy": "Konten nutzen",
+  "mobile.server.providers.poolFillFirst": "Erst auffüllen",
+  "mobile.server.providers.poolSpread": "Verteilen",
+  "mobile.server.providers.poolSpreadHint":
+    "Agenten verteilen sich auf die Konten mit der meisten verbleibenden Nutzung. Ein Agent wechselt das Konto nur, wenn ein anderes Konto deutlich mehr Spielraum hat.",
   "mobile.server.providers.accountsPooledHint":
     "Agenten teilen sich diese Konten. Ein neues Konto meldet sich auf seiner Seite auf diesem Telefon an.",
   "mobile.server.providers.accountsPooledOnComputer":

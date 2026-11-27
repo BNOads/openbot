@@ -639,6 +639,16 @@ export const messages = defineMessages("mobile.server", {
   "mobile.server.settings.memoryLimitLoadFailed": "Could not load the memory limit of this server.",
   "mobile.server.settings.memoryLimitSaveFailed": "Could not save the memory limit. Try again.",
   "mobile.server.settings.memoryLimitUnsupported": "Update OpenBot on this server to change its memory limit here.",
+  "mobile.server.settings.mediaApprovalCredits": "Ask before spending more than",
+  "mobile.server.settings.mediaApprovalCreditsUnit": "credits",
+  "mobile.server.settings.mediaApprovalCreditsLoadFailed": "Could not load the credit approval limit of this server.",
+  "mobile.server.settings.mediaApprovalCreditsSaveFailed": "Could not save the credit approval limit. Try again.",
+  "mobile.server.settings.mediaApprovalCreditsUnsupported":
+    "Update OpenBot on this server to change its credit approval limit here.",
+  "mobile.server.settings.mediaApprovalAgents": "Agents can use credits",
+  "mobile.server.settings.mediaApprovalAgentsSaveFailed": "Could not change agent use of credits. Try again.",
+  "mobile.server.settings.mediaApprovalAsk": "Ask when credits are needed",
+  "mobile.server.settings.mediaApprovalAskSaveFailed": "Could not change credit requests. Try again.",
   "mobile.server.settings.memoryReview": "Memory review",
   "mobile.server.settings.memoryReviewDescription":
     "How often agents on this server save lasting facts from their chats in the background.",
@@ -1418,6 +1428,11 @@ export const messages = defineMessages("mobile.server", {
   "mobile.server.providers.pool": "Pool accounts",
   "mobile.server.providers.poolHint":
     "Agents use one account until it nears a usage limit, then the account whose limit resets first.",
+  "mobile.server.providers.poolStrategy": "Use accounts",
+  "mobile.server.providers.poolFillFirst": "Fill first",
+  "mobile.server.providers.poolSpread": "Spread",
+  "mobile.server.providers.poolSpreadHint":
+    "Agents spread over the accounts with the most usage left. An agent changes accounts only when another account has much more room.",
   "mobile.server.providers.accountsPooledHint":
     "Agents share these accounts. A new account signs in on its page on this phone.",
   "mobile.server.providers.accountsPooledOnComputer":

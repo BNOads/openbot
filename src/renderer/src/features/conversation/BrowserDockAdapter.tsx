@@ -409,6 +409,7 @@ export function BrowserDockAdapter(adapterProps: { tab: BrowserTab | undefined; 
             onRespondSecret={(input) => conversationRuntime(props).agent.respondToBrowserSecret(input)}
             onAnswerPrompt={answerPrompt}
             onRespondApproval={respondApproval}
+            media={props.mediaApproval}
             onDismissReply={dismissReply}
             onOpenChat={() => setActiveRightPanel("browser")}
             onSelectAgent={props.onSelectAgent}

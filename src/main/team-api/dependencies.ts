@@ -23,6 +23,8 @@ import type {
   VoiceLiveEvent,
   VoiceTranscriptionResult,
 } from "@openbot/contracts/ipc";
+import type { WatchRelaySetup } from "@openbot/contracts/team-protocol/watch-relay-v1";
+import type { WorkflowSpotEvent } from "@openbot/contracts/team-protocol/workflow-presence-v1";
 import type { Logger } from "@openbot/logging";
 import type { Effect } from "effect";
 import type { AgentService } from "../../backend/agent-service";
@@ -79,6 +81,7 @@ import type { MachineAlertMonitor } from "../machine-alerts";
 import type { McpAccessControl } from "../mcp-access-store";
 import type { McpHostSignIns } from "../mcp-host-sign-ins";
 import type { McpServerOwnersStore } from "../mcp-server-owners-store";
+import type { CreditAsksControl, MediaApprovalCreditsControl } from "../media-approval-credits-preference-store";
 import type { MemoryReviewPreferenceStore } from "../memory-review-preference-store";
 import type { ModelVisibility } from "../model-visibility";
 import type { OnePasswordConnectorService } from "../onepassword-connector-service";
@@ -191,14 +194,19 @@ type TeamApiAgentMethods = Pick<
   | "deleteAgentHistory"
   | "clearChannelContext"
   | "compactChannelContext"
+  | "channelCompactAvailable"
   | "deleteChannelHistory"
   | "compactAgentContext"
   | "compactTaskContext"
   | "agentIdForRequest"
   | "pendingApproval"
+  | "pendingMediaApproval"
+  | "pendingCreditsHold"
   | "pendingPrompts"
   | "respondToPrompt"
   | "respondToApproval"
+  | "respondToMediaApproval"
+  | "respondToCreditsHold"
   | "respondToBrowserSecret"
   | "respondToBrowserTakeover"
 >;
@@ -276,6 +284,8 @@ export type TeamApiProviderAccounts = Pick<
   | "models"
   | "pools"
   | "setPool"
+  | "poolStrategies"
+  | "setPoolStrategy"
   | "liveVoiceAccount"
   | "setLiveVoiceAccount"
   | "usage"
@@ -484,6 +494,8 @@ export interface TeamApiAdmin {
   promptCacheTtl?: Pick<PromptCacheTtlPreferenceStore, "get" | "set">;
   claudeUserSetup?: ClaudeUserSetupControl;
   cacheExpiryCompaction?: CacheExpiryCompactionControl;
+  mediaApprovalCredits?: MediaApprovalCreditsControl;
+  creditAsks?: Pick<CreditAsksControl, "setMuted" | "mutedFor">;
   claudeCompactWindow?: ClaudeCompactWindowControl;
   providerEnvironment?: Pick<ProviderEnvironmentControl, "get" | "set">;
   providerDetection?: {
@@ -563,10 +575,13 @@ export type TeamApiBrowser = Pick<
   | "startTeach"
   | "stopTeach"
   | "stop"
+  | "answerPermission"
   | "importSignIn"
+  | "answerHttpSignIn"
   | "startView"
   | "dispatchViewInput"
   | "copyViewSelection"
+  | "answerViewDialog"
 >;
 export type TeamApiBrowserView = Pick<
   BrowserViewGateway,
@@ -621,10 +636,16 @@ export type TeamApiClientBrowser = Pick<
   "setPresence" | "resolve" | "sessionEnded" | "subscribe" | "shares"
 >;
 
+export interface TeamApiWatchRelay {
+  available(): boolean;
+  setup(): Effect.Effect<WatchRelaySetup | null>;
+}
+
 export type TeamApiAgentAccess = Pick<AgentAccessStore, "copyAgent" | "get" | "levels" | "set" | "subscribe">;
 export type TeamApiServerAudit = Pick<ServerAuditStore, "read">;
 
 export interface TeamApiOptions {
+  onMemberUse?: ((memberId: string) => void) | undefined;
   events?: HostEventsApi | undefined;
   channels?: ChannelService | undefined;
   mcpServers?: TeamApiMcpServers | undefined;
@@ -686,14 +707,17 @@ export interface TeamApiOptions {
   chat?: TeamChatStore | undefined;
   onDirectMessage?: ((event: DirectMessageRealtimeEvent) => void) | undefined;
   onDirectTyping?: ((event: DirectTypingRealtimeEvent) => void) | undefined;
+  onWorkflowSpot?: ((event: WorkflowSpotEvent) => void) | undefined;
   createInvite?: OmitThisParameter<HostService["createInvite"]> | undefined;
   updateMember?: OmitThisParameter<HostService["updateMember"]> | undefined;
   removeMember?: OmitThisParameter<HostService["removeMember"]> | undefined;
   onSessionRevoked?: ((sessionId: string) => Effect.Effect<void, RemoteWorkflowError>) | undefined;
   liveActivityPush?: LiveActivityPushService | undefined;
   pushNotifications?: PushNotificationService | undefined;
+  watchRelay?: TeamApiWatchRelay | undefined;
   focusUse?: boolean | undefined;
   rateLimitCapacity?: number | undefined;
+  workflowSpotStaleMs?: number | undefined;
   now?: (() => number) | undefined;
   logger?: Logger | undefined;
 }

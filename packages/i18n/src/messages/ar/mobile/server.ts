@@ -622,6 +622,16 @@ export const messages = {
   "mobile.server.settings.memoryLimitLoadFailed": "تعذّر تحميل حد الذاكرة لهذا الخادم.",
   "mobile.server.settings.memoryLimitSaveFailed": "تعذّر حفظ حد الذاكرة. أعد المحاولة.",
   "mobile.server.settings.memoryLimitUnsupported": "حدّث OpenBot على هذا الخادم لتغيير حد الذاكرة من هنا.",
+  "mobile.server.settings.mediaApprovalCredits": "اسأل قبل إنفاق أكثر من",
+  "mobile.server.settings.mediaApprovalCreditsUnit": "رصيد",
+  "mobile.server.settings.mediaApprovalCreditsLoadFailed": "تعذّر تحميل حد الموافقة على الأرصدة لهذا الخادم.",
+  "mobile.server.settings.mediaApprovalCreditsSaveFailed": "تعذّر حفظ حد الموافقة على الأرصدة. أعد المحاولة.",
+  "mobile.server.settings.mediaApprovalCreditsUnsupported":
+    "حدّث OpenBot على هذا الخادم لتغيير حد الموافقة على الأرصدة من هنا.",
+  "mobile.server.settings.mediaApprovalAgents": "يمكن للوكلاء استخدام الأرصدة",
+  "mobile.server.settings.mediaApprovalAgentsSaveFailed": "تعذّر تغيير استخدام الوكلاء للأرصدة. أعد المحاولة.",
+  "mobile.server.settings.mediaApprovalAsk": "اسأل عند الحاجة إلى أرصدة",
+  "mobile.server.settings.mediaApprovalAskSaveFailed": "تعذّر تغيير طلبات الأرصدة. أعد المحاولة.",
   "mobile.server.settings.memoryReview": "مراجعة الذاكرة",
   "mobile.server.settings.memoryReviewDescription":
     "عدد المرات التي يحفظ فيها وكلاء هذا الخادم الحقائق الدائمة من دردشاتهم في الخلفية.",
@@ -1486,6 +1496,11 @@ export const messages = {
   "mobile.server.providers.pool": "تجميع الحسابات",
   "mobile.server.providers.poolHint":
     "يستخدم الوكلاء حسابًا واحدًا حتى يقترب من حد الاستخدام، ثم الحساب الذي يُعاد تعيين حده أولًا.",
+  "mobile.server.providers.poolStrategy": "طريقة الاستخدام",
+  "mobile.server.providers.poolFillFirst": "ملء الأول أولًا",
+  "mobile.server.providers.poolSpread": "توزيع",
+  "mobile.server.providers.poolSpreadHint":
+    "يتوزع الوكلاء على الحسابات التي بقي فيها أكبر قدر من الاستخدام. لا يغيّر الوكيل حسابه إلا عندما يكون لدى حساب آخر مساحة أكبر بكثير.",
   "mobile.server.providers.accountsPooledHint":
     "يتشارك الوكلاء هذه الحسابات. يسجّل الحساب الجديد الدخول في صفحته على هذا الهاتف.",
   "mobile.server.providers.accountsPooledOnComputer": "يتشارك الوكلاء هذه الحسابات. أضف حسابًا في OpenBot على حاسوب.",
