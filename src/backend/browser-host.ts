@@ -4170,7 +4170,8 @@ export class BrowserHost {
       );
     });
     contents.on("console-message", (...eventArgs) => {
-      if (this.#takeoverTabIds.has(tab.id) || this.#userControlTabIds.has(tab.id) || tab.secret) return;
+      if (this.#takeoverTabIds.has(tab.id) || this.#userControlTabIds.has(tab.id) || tab.secret || tab.secretDocument)
+        return;
       const details = readConsoleMessage(eventArgs);
       if (!details) return;
       tab.diagnostics.add({
